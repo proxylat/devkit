@@ -1,0 +1,49 @@
+(test
+ (name test_pkgfile)
+ (libraries devkit alcotest))
+
+(test
+ (name test_winget)
+ (libraries devkit alcotest))
+
+(test
+ (name test_dashboard)
+ (libraries devkit alcotest))
+
+(test
+ (name test_inventory)
+ (libraries devkit alcotest))
+
+(test
+ (name test_gh)
+ (libraries devkit alcotest))
+
+(test
+ (name test_hash)
+ (libraries devkit alcotest unix))
+
+(test
+ (name test_zipx)
+ (libraries devkit alcotest unix)
+ (deps (source_tree fixtures)))
+
+(test
+ (name test_bootstrap)
+ (libraries devkit alcotest unix)
+ (deps (source_tree fixtures)))
+
+(test
+ (name test_install)
+ (libraries devkit alcotest))
+
+(test
+ (name test_app)
+ (libraries devkit alcotest str yojson))
+
+(test
+ (name test_winget_json)
+ (libraries devkit alcotest yojson))
+
+(test
+ (name test_plugin)
+ (libraries devkit alcotest re sexplib))
