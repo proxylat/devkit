@@ -6,7 +6,8 @@ installed across your package managers into a `devkit.toml` manifest. Support fo
 ## Build
 
 System OCaml 5.5.0 + opam `system` switch. Deps:
-`alcotest cmdliner yojson digestif decompress sexplib re ocamlformat`.
+`alcotest cmdliner yojson digestif decompress sexplib re toml
+lambda-term lwt ocamlformat`.
 
 ```sh
 eval $(opam env --switch=system)
@@ -17,7 +18,7 @@ dune exec bin/main.exe -- --help
 
 Without `eval $(opam env ...)`, the shell finds the wrong dune
 (`/usr/bin`) and the build fails with missing libraries (e.g.
-`notty.unix not found`). To stop prefixing every command, persist it:
+`lambda-term not found`). To stop prefixing every command, persist it:
 
 ```sh
 echo 'eval $(opam env --switch=system 2>/dev/null)' >> ~/.bashrc

@@ -1,7 +1,7 @@
 (** Interactive dashboard state machine.
 
     Pure navigation, selection and frame rendering over dashboard sections.
-    The notty frontend in [bin/] draws the frame and feeds key actions in;
+    The lambda-term frontend in [bin/] draws the frame and feeds key actions in;
     tests drive [step] and [frame] without a terminal. Row selection
     mirrors [Dashboard.render]: empty sections and "Newly detected" are
     skipped. *)
@@ -243,7 +243,7 @@ let render_line : line -> string = function
   | Row (e, cursor) -> (if cursor then "> " else "  ") ^ row_text e
 ;;
 
-(** Text frame: one string per line. The notty frontend draws these
+(** Text frame: one string per line. The lambda-term frontend draws these
     with per-row colors from {!lines}. *)
 let frame (s : state) : string list = List.map render_line (lines s)
 

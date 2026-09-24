@@ -1,64 +1,81 @@
-(** Notty frontend for the dashboard state machine.
+(** Lambda-term frontend for the dashboard state machine.
 
-    Draws {!Devkit.Tui.frame} lines, feeds key events in, runs installs on
-    Enter. On exit the plain-text dashboard plus the install log go to
-    stdout, so redirected output stays usable. *)
+    Draws {!Devkit.Tui.frame} lines, feeds key events in, runs installs
+    on Enter. On exit the plain-text dashboard plus the install log go
+    to stdout, so redirected output stays usable. Lambda-term (unlike
+    notty) has a real Windows backend, so this frontend serves both
+    OSes. Installs run synchronously and freeze the UI while they run;
+    mouse/wheel input is ignored (keyboard scroll covers it). *)
 
 open Devkit
-open Notty
-open Notty_unix
+open Lwt.Infix
+
+let style_of_color : Tui.color -> LTerm_style.t = function
+  | Tui.Plain -> LTerm_style.none
+  | Tui.Green -> { LTerm_style.none with foreground = Some LTerm_style.green }
+  | Tui.Yellow -> { LTerm_style.none with foreground = Some LTerm_style.yellow }
+  | Tui.Red -> { LTerm_style.none with foreground = Some LTerm_style.red }
+  | Tui.Cyan -> { LTerm_style.none with foreground = Some LTerm_style.cyan }
+;;
+
+let styled_of_line (i : int) : Tui.line -> LTerm_text.t = function
+  | Tui.Head s when i = 0 ->
+    LTerm_text.stylise s { LTerm_style.none with bold = Some true }
+  | Tui.Head s -> LTerm_text.of_utf8 s
+  | Tui.Divider _ as d ->
+    LTerm_text.stylise
+      (" " ^ Tui.render_line d)
+      { LTerm_style.none with bold = Some true; foreground = Some LTerm_style.lblack }
+  | Tui.Row (e, cursor) as row ->
+    let style = style_of_color (Tui.color_of e.Tui.item.Manifest.status) in
+    let style = if cursor then { style with reverse = Some true } else style in
+    LTerm_text.stylise (Tui.render_line row) style
+;;
+
+type ev =
+  | Quit
+  | Enter
+  | Action of Tui.action
+  | Resized of LTerm_geom.size
+  | Nothing
+
+let is_ctrl_q : Uchar.t -> bool =
+  fun c -> Uchar.equal c (Uchar.of_char 'q') || Uchar.equal c (Uchar.of_char 'Q')
+;;
+
+let is_nav : Uchar.t -> Tui.action option =
+  fun c ->
+  if Uchar.equal c (Uchar.of_char 'k')
+  then Some Tui.Up
+  else if Uchar.equal c (Uchar.of_char 'j')
+  then Some Tui.Down
+  else None
+;;
+
+let classify : LTerm_event.t -> ev = function
+  | LTerm_event.Resize size -> Resized size
+  | LTerm_event.Key k when k.LTerm_key.control -> Quit
+  | LTerm_event.Key { code = LTerm_key.Escape; _ } -> Quit
+  | LTerm_event.Key { code = LTerm_key.Char c; _ } when is_ctrl_q c -> Quit
+  | LTerm_event.Key { code = LTerm_key.Enter; _ } -> Enter
+  | LTerm_event.Key { code = LTerm_key.Up; _ } -> Action Tui.Up
+  | LTerm_event.Key { code = LTerm_key.Down; _ } -> Action Tui.Down
+  | LTerm_event.Key { code = LTerm_key.Prev_page; _ } -> Action Tui.Page_up
+  | LTerm_event.Key { code = LTerm_key.Next_page; _ } -> Action Tui.Page_down
+  | LTerm_event.Key { code = LTerm_key.Home; _ } -> Action Tui.Home
+  | LTerm_event.Key { code = LTerm_key.End; _ } -> Action Tui.End
+  | LTerm_event.Key { code = LTerm_key.Char c; _ } ->
+    (match is_nav c with
+     | Some a -> Action a
+     | None -> Nothing)
+  | LTerm_event.Key _ | LTerm_event.Sequence _ | LTerm_event.Mouse _ -> Nothing
+;;
 
 let kind_of : Manifest.item_type -> string = function
   | Manifest.Winget -> "winget"
   | Manifest.GitHub -> "github"
   | Manifest.Url -> "url"
   | Manifest.Pm s -> s
-;;
-
-let color_attr : Tui.color -> attr = function
-  | Tui.Plain -> A.empty
-  | Tui.Green -> A.(fg green)
-  | Tui.Yellow -> A.(fg yellow)
-  | Tui.Red -> A.(fg red)
-  | Tui.Cyan -> A.(fg cyan)
-;;
-
-let draw (st : Tui.state) : image =
-  let img_of_line i = function
-    | Tui.Head s -> if i = 0 then I.string A.(st bold) s else I.string A.empty s
-    | Tui.Divider _ as d -> I.string A.(st bold ++ fg lightblack) (" " ^ Tui.render_line d)
-    | Tui.Row (e, cursor) ->
-      let attr = color_attr (Tui.color_of e.Tui.item.Manifest.status) in
-      let attr = if cursor then A.(attr ++ st reverse) else attr in
-      I.string attr (Tui.render_line (Tui.Row (e, cursor)))
-  in
-  I.vcat (List.mapi img_of_line (Tui.lines st))
-;;
-
-type ev =
-  [ Notty.Unescape.event
-  | `Resize of int * int
-  | `End
-  ]
-
-let quit_key : ev -> bool = function
-  | `End -> true
-  | `Key (`Escape, _) -> true
-  | `Key (`ASCII 'q', _) | `Key (`ASCII 'Q', _) -> true
-  | `Key (_, mods) -> List.mem `Ctrl mods
-  | _ -> false
-;;
-
-let nav : ev -> Tui.action option = function
-  | `Key (`Arrow `Up, _) | `Key (`ASCII 'k', _) -> Some Tui.Up
-  | `Key (`Arrow `Down, _) | `Key (`ASCII 'j', _) -> Some Tui.Down
-  | `Key (`Page `Up, _) -> Some Tui.Page_up
-  | `Key (`Page `Down, _) -> Some Tui.Page_down
-  | `Key (`Home, _) -> Some Tui.Home
-  | `Key (`End, _) -> Some Tui.End
-  | `Mouse (`Press (`Scroll `Up), _, _) -> Some Tui.Scroll_up
-  | `Mouse (`Press (`Scroll `Down), _, _) -> Some Tui.Scroll_down
-  | _ -> None
 ;;
 
 let press_enter (deps : Install.deps) (st : Tui.state) : Tui.state =
@@ -80,6 +97,16 @@ let press_enter (deps : Install.deps) (st : Tui.state) : Tui.state =
 
 let viewport (w : int) (h : int) : int * int = max 1 w, max 1 (h - 3)
 
+let draw_all (term : LTerm.t) (st : Tui.state) : unit Lwt.t =
+  LTerm.clear_screen term
+  >>= fun () ->
+  LTerm.goto term { row = 0; col = 0 }
+  >>= fun () ->
+  Lwt_list.iter_s
+    (fun text -> LTerm.fprintls term text)
+    (List.mapi styled_of_line (Tui.lines st))
+;;
+
 let run ~(tools : Plugin.tool list) (env : App.env) : unit =
   let sections, winget_path = App.load_manifest env.App.fs Manifest.filename in
   let s = App.scan env ~override_path:winget_path ~extra:tools in
@@ -91,24 +118,35 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
   let dash = Dashboard.build_sections ~show s.App.apps sections s.App.info in
   let fetch = Fetch.curl_fetch Proc.default_runner in
   let deps = Install.real_deps fetch ~winget_override:winget_path () in
-  let term = Term.create () in
-  let w, h = Term.size term in
-  let vw, vh = viewport w h in
-  let rec loop (st : Tui.state) : Tui.state =
-    Term.image term (draw st);
-    match Term.event term with
-    | ev when quit_key ev -> st
-    | `Key (`Enter, _) -> loop (press_enter deps st)
-    | `Resize (w, h) ->
-      let vw, vh = viewport w h in
-      loop (Tui.resize st ~height:vh ~width:vw)
-    | ev ->
-      (match nav ev with
-       | Some a -> loop (Tui.step st a)
-       | None -> loop st)
+  let final =
+    Lwt_main.run
+      (Lazy.force LTerm.stdout
+       >>= fun term ->
+       LTerm.enter_raw_mode term
+       >>= fun mode ->
+       LTerm.hide_cursor term
+       >>= fun () ->
+       let geom = LTerm.size term in
+       let vw, vh = viewport geom.LTerm_geom.cols geom.LTerm_geom.rows in
+       let rec loop (st : Tui.state) : Tui.state Lwt.t =
+         draw_all term st
+         >>= fun () ->
+         LTerm.read_event term
+         >>= fun ev ->
+         match classify ev with
+         | Quit -> Lwt.return st
+         | Enter -> loop (press_enter deps st)
+         | Action a -> loop (Tui.step st a)
+         | Resized g ->
+           let vw, vh = viewport g.LTerm_geom.cols g.LTerm_geom.rows in
+           loop (Tui.resize st ~height:vh ~width:vw)
+         | Nothing -> loop st
+       in
+       loop (Tui.make dash ~height:vh ~width:vw)
+       >>= fun st ->
+       LTerm.leave_raw_mode term mode
+       >>= fun () -> LTerm.show_cursor term >>= fun () -> Lwt.return st)
   in
-  let final = loop (Tui.make dash ~height:vh ~width:vw) in
-  Term.release term;
   print_string (Dashboard.render dash);
   List.iter print_endline final.Tui.log
 ;;

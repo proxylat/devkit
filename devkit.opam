@@ -18,7 +18,8 @@ depends: [
   "sexplib" {>= "0.17"}
   "re" {>= "1.11"}
   "toml" {>= "7.0"}
-  "notty" {>= "0.2.3"}
+  "lambda-term" {>= "3.0"}
+  "lwt" {>= "5.0"}
   "alcotest" {>= "1.7" & with-test}
   "odoc" {with-doc}
 ]
