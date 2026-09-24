@@ -97,29 +97,48 @@ type scan =
   ; winget : string
   }
 
+(** [DEVKIT_TIMING=1] prints per-phase startup timings to stderr, so a
+    slow start can be blamed on a phase instead of guessed at. *)
+let timed (label : string) (f : unit -> 'a) : 'a =
+  match Sys.getenv_opt "DEVKIT_TIMING" with
+  | None | Some "" -> f ()
+  | Some _ ->
+    let t0 = Unix.gettimeofday () in
+    let r = f () in
+    Printf.eprintf
+      "[timing] %s: %.0fms\n%!"
+      label
+      ((Unix.gettimeofday () -. t0) *. 1000.0);
+    r
+;;
+
 (** One scan + update check; the memoized [winget list] fetch is shared by
     both, so a command spawns winget once per 8s window. A failed ensure
     degrades to winget-less operation (""). *)
 let scan (e : env) ~(override_path : string) ~(extra : Plugin.tool list) : scan =
   let winget =
-    match Bootstrap.ensure ~override_path e.bio with
-    | Ok w -> w
-    | Error _ -> ""
+    timed "ensure" (fun () ->
+      match Bootstrap.ensure ~override_path e.bio with
+      | Ok w -> w
+      | Error _ -> "")
   in
   let fetch, _ = Proc.winget_list e.run in
-  let apps = Inventory.scan_all e.run ~winget:(fun () -> fetch winget) ~extra in
+  let apps =
+    timed "scan_all" (fun () -> Inventory.scan_all e.run ~winget:(fun () -> fetch winget) ~extra)
+  in
   let info =
-    match fetch winget with
-    | None ->
-      let m = info_from_scan apps in
-      if Winget_parse.IdMap.is_empty m then None else Some m
-    | Some out ->
-      let m = Winget_parse.parse_list_table out in
-      if Winget_parse.IdMap.is_empty m
-      then (
-        let fb = info_from_scan apps in
-        if Winget_parse.IdMap.is_empty fb then None else Some fb)
-      else Some m
+    timed "info" (fun () ->
+      match fetch winget with
+      | None ->
+        let m = info_from_scan apps in
+        if Winget_parse.IdMap.is_empty m then None else Some m
+      | Some out ->
+        let m = Winget_parse.parse_list_table out in
+        if Winget_parse.IdMap.is_empty m
+        then (
+          let fb = info_from_scan apps in
+          if Winget_parse.IdMap.is_empty fb then None else Some fb)
+        else Some m)
   in
   { apps; info; winget }
 ;;
@@ -139,7 +158,9 @@ let default_view (e : env) ~(tools : Plugin.tool list) : string =
     let v = winget_show e.bio s.winget id in
     if v = "" then None else Some v
   in
-  let dash = build_sections ~show (to_dashboard_apps s.apps) sections s.info in
+  let dash =
+    timed "build" (fun () -> build_sections ~show (to_dashboard_apps s.apps) sections s.info)
+  in
   render dash
 ;;
 

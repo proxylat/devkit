@@ -1,7 +1,7 @@
 # devkit
 
-Scan your PC for installed software across package managers, merge the
-result with a `devkit.toml` manifest, and export a restore-ready snapshot.
+Export and import your dev setup, snapshot the software
+installed across your package managers into a `devkit.toml` manifest. Support for Linux and Windows.
 
 ## Build
 
@@ -13,6 +13,14 @@ eval $(opam env --switch=system)
 dune build
 dune runtest          # 129 alcotests, must stay green
 dune exec bin/main.exe -- --help
+```
+
+Without `eval $(opam env ...)`, the shell finds the wrong dune
+(`/usr/bin`) and the build fails with missing libraries (e.g.
+`notty.unix not found`). To stop prefixing every command, persist it:
+
+```sh
+echo 'eval $(opam env --switch=system 2>/dev/null)' >> ~/.bashrc
 ```
 
 `dune-project` is the source of truth for packaging; `devkit.opam` is

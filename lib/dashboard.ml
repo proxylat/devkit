@@ -12,31 +12,6 @@ type app =
   ; pm : string
   }
 
-(** Map [f] over [xs] on up to 8 domains, results in input order. One
-    domain per item would drown short lists in thread overhead, so items
-    are chunked; empty chunks are skipped. Domain-safe as long as [f]
-    touches no shared mutable state (here: one process spawn per call). *)
-let par_map8 (f : 'a -> 'b) (xs : 'a list) : 'b list =
-  let arr = Array.of_list xs in
-  let n = Array.length arr in
-  if n = 0
-  then []
-  else (
-    let workers = min 8 n in
-    let chunk = (n + workers - 1) / workers in
-    let jobs =
-      List.filter_map
-        (fun w ->
-           let lo = w * chunk in
-           if lo >= n
-           then None
-           else Some (Array.sub arr lo (min chunk (n - lo)) |> Array.to_list))
-        (List.init workers Fun.id)
-    in
-    let doms = List.map (fun job -> Domain.spawn (fun () -> List.map f job)) jobs in
-    List.concat_map Domain.join doms)
-;;
-
 let status_symbol = function
   | Installed -> "✓"
   | NeedsUpdate -> "!"
@@ -148,7 +123,7 @@ let build_sections
   List.iter2
     (fun id ver -> Hashtbl.replace show_table id ver)
     show_ids
-    (par_map8 show show_ids);
+    (Proc.par_map8 show show_ids);
   let pkgs_sections =
     List.map
       (fun sec ->
