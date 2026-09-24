@@ -32,33 +32,36 @@ let base_io
 (* --- find_portable --- *)
 
 let test_portable_hit () =
-  let is_file = fun p -> p = "/a/winget.exe" in
-  Alcotest.(check string) "hit" "/a/winget.exe" (Bootstrap.find_portable ~is_file "/a")
+  let want = Filename.concat "/a" "winget.exe" in
+  let is_file = fun p -> p = want in
+  Alcotest.(check string) "hit" want (Bootstrap.find_portable ~is_file "/a")
 ;;
 
 let test_portable_prefers_winget_exe () =
-  let is_file = fun p -> p = "/a/winget.exe" || p = "/a/AppInstaller.exe" in
-  Alcotest.(check string) "order" "/a/winget.exe" (Bootstrap.find_portable ~is_file "/a")
+  let want = Filename.concat "/a" "winget.exe" in
+  let other = Filename.concat "/a" "AppInstaller.exe" in
+  let is_file = fun p -> p = want || p = other in
+  Alcotest.(check string) "order" want (Bootstrap.find_portable ~is_file "/a")
 ;;
 
 let test_portable_subfolder () =
-  let is_file = fun p -> p = "/a/build/winget/AppInstaller.exe" in
-  Alcotest.(check string)
-    "subfolder"
-    "/a/build/winget/AppInstaller.exe"
-    (Bootstrap.find_portable ~is_file "/a")
+  let want =
+    Filename.concat
+      (Filename.concat (Filename.concat "/a" "build") "winget")
+      "AppInstaller.exe"
+  in
+  let is_file = fun p -> p = want in
+  Alcotest.(check string) "subfolder" want (Bootstrap.find_portable ~is_file "/a")
 ;;
 
 let test_portable_walks_up () =
-  let is_file = fun p -> p = "/a/winget/winget.exe" in
-  Alcotest.(check string)
-    "walk-up"
-    "/a/winget/winget.exe"
-    (Bootstrap.find_portable ~is_file "/a/b/c")
+  let want = Filename.concat (Filename.concat "/a" "winget") "winget.exe" in
+  let is_file = fun p -> p = want in
+  Alcotest.(check string) "walk-up" want (Bootstrap.find_portable ~is_file "/a/b/c")
 ;;
 
 let test_portable_stops_at_4 () =
-  let is_file = fun p -> p = "/a/winget.exe" in
+  let is_file = fun p -> p = Filename.concat "/a" "winget.exe" in
   Alcotest.(check string)
     "beyond 4 levels"
     ""
@@ -72,10 +75,10 @@ let test_on_path () =
     | "PATH" -> Some "/x;/y:/z"
     | _ -> None
   in
-  let is_file = fun p -> p = "/y/winget" in
+  let is_file = fun p -> p = Filename.concat "/y" "winget" in
   Alcotest.(check string)
     "both separators"
-    "/y/winget"
+    (Filename.concat "/y" "winget")
     (Bootstrap.find_on_path ~getenv ~is_file "winget")
 ;;
 
@@ -207,16 +210,17 @@ let test_sizes () =
 
 let test_resolve_cwd_wins_no_spawn () =
   let spawns = ref 0 in
+  let want = Filename.concat (Filename.dirname "/proj/sub") "winget.exe" in
   let io =
     base_io
-      ~is_file:(fun p -> p = "/proj/winget.exe")
+      ~is_file:(fun p -> p = want)
       ~spawn:(fun _ _ ->
         incr spawns;
         "", false)
       ~cwd:(Ok "/proj/sub")
       ()
   in
-  Alcotest.(check string) "cwd portable" "/proj/winget.exe" (Bootstrap.resolve io);
+  Alcotest.(check string) "cwd portable" want (Bootstrap.resolve io);
   Alcotest.(check int) "no probes" 0 !spawns
 ;;
 
@@ -226,12 +230,15 @@ let test_resolve_path_fallback () =
       ~getenv:(function
         | "PATH" -> Some "/bin"
         | _ -> None)
-      ~is_file:(fun p -> p = "/bin/winget")
+      ~is_file:(fun p -> p = Filename.concat "/bin" "winget")
       ~cwd:(Ok "/proj")
       ~exe:(Ok "/opt/app")
       ()
   in
-  Alcotest.(check string) "PATH hit" "/bin/winget" (Bootstrap.resolve io)
+  Alcotest.(check string)
+    "PATH hit"
+    (Filename.concat "/bin" "winget")
+    (Bootstrap.resolve io)
 ;;
 
 let test_resolve_miss () =
@@ -254,10 +261,11 @@ let test_ensure_override_blind () =
 
 let test_ensure_resolved () =
   let get, _ = fresh_cache () in
-  let io = base_io ~is_file:(fun p -> p = "/p/winget.exe") ~cwd:(Ok "/p") () in
+  let want = Filename.concat "/p" "winget.exe" in
+  let io = base_io ~is_file:(fun p -> p = want) ~cwd:(Ok "/p") () in
   match Bootstrap.ensure_full ~override_path:"" ~resolve_path:get io with
   | Error e -> Alcotest.fail e
-  | Ok p -> Alcotest.(check string) "resolved" "/p/winget.exe" p
+  | Ok p -> Alcotest.(check string) "resolved" want p
 ;;
 
 let test_ensure_download_cert_advice () =
@@ -411,7 +419,7 @@ let test_cache_memoizes () =
       ~getenv:(function
         | "PATH" -> Some "/bin"
         | _ -> None)
-      ~is_file:(fun p -> p = "/bin/winget")
+      ~is_file:(fun p -> p = Filename.concat "/bin" "winget")
       ~cwd:(Ok "/proj")
       ~exe:(Ok "/opt/app")
       ()
@@ -423,7 +431,7 @@ let test_cache_memoizes () =
      call returns the cached value without re-resolving, even after the
      filesystem changes. *)
   let io2 = { io with Bootstrap.is_file = (fun _ -> false) } in
-  Alcotest.(check string) "memoized" "/bin/winget" (get io2);
+  Alcotest.(check string) "memoized" (Filename.concat "/bin" "winget") (get io2);
   reset ();
   Alcotest.(check string) "reset clears" "" (get io2)
 ;;

@@ -71,9 +71,11 @@ let run_installer (spawn : Bootstrap.spawn) (path : string) : (unit, string) res
 (** Open [url] in the default browser: [cmd /c start] on Windows, [open]
     on macOS, [xdg-open] elsewhere. macOS is detected with [uname -s]
     through [spawn], keeping the function testable. *)
-let real_open_browser (spawn : Bootstrap.spawn) (url : string) : (unit, string) result =
+let real_open_browser ?(os = Sys.os_type) (spawn : Bootstrap.spawn) (url : string)
+  : (unit, string) result
+  =
   let prog, args =
-    if Sys.win32
+    if os = "Win32"
     then "cmd", [ "/c"; "start"; ""; url ]
     else (
       let uname, ok = spawn "uname" [ "-s" ] in

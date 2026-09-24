@@ -13,7 +13,7 @@ let unix_subset () =
       Some "git\nnode\n"
     | _ -> None
   in
-  let hits = Proc.which run [ "git"; "node"; "missing"; ""; "git" ] in
+  let hits = Proc.which ~os:"Unix" run [ "git"; "node"; "missing"; ""; "git" ] in
   Alcotest.(check (list string)) "echo order" [ "git"; "node" ] hits;
   Alcotest.(check int) "single spawn" 1 !calls;
   (* default_runner drops non-zero output, so the loop must force exit 0. *)
@@ -26,12 +26,12 @@ let unix_subset () =
 
 let unix_none () =
   let run _ _ = None in
-  Alcotest.(check (list string)) "runner miss" [] (Proc.which run [ "git" ])
+  Alcotest.(check (list string)) "runner miss" [] (Proc.which ~os:"Unix" run [ "git" ])
 ;;
 
 let unix_empty () =
   let run _ _ = Alcotest.fail "must not spawn" in
-  Alcotest.(check (list string)) "no names" [] (Proc.which run [])
+  Alcotest.(check (list string)) "no names" [] (Proc.which ~os:"Unix" run [])
 ;;
 
 let win_basenames () =
