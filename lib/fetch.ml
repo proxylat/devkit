@@ -1,8 +1,9 @@
 (** HTTP fetching.
 
-    OCaml has no stock HTTPS client, and pulling in cohttp/Lwt would clash
-    with the no-Lwt notty choice, so production fetching shells out to
-    [curl]: inbox on Windows 10 1803+ and present on most Linux systems.
+    OCaml has no stock HTTPS client, and pulling cohttp into [lib]
+    would drag async into the stdlib-only core, so production fetching
+    shells out to [curl]: inbox on Windows 10 1803+ and present on most
+    Linux systems.
     The call shape stays injectable: tests and future backends substitute
     [fetch]. *)
 

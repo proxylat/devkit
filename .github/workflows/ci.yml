@@ -19,20 +19,6 @@ jobs:
           ocaml-compiler: 5.5
           dune-cache: true
 
-      # Release notty caps ocaml < 5.4; master builds on 5.5 with one
-      # extra record field (ci/notty-ocaml55.patch). Upstream has no
-      # Windows backend, so ci/notty-winsize-windows.c (Win32 console
-      # fallback, upstream code untouched in #else) is copied over
-      # src-unix/native/winsize.c to keep notty.unix compiling on
-      # mingw. CI never runs the TUI on Windows (plain-text fallback
-      # in bin/main.ml); both shims die with notty in Phase B.
-      - name: Pin patched notty
-        run: |
-          git clone --depth 50 https://github.com/pqwy/notty.git notty-upstream
-          git -C notty-upstream apply ../ci/notty-ocaml55.patch
-          cp ci/notty-winsize-windows.c notty-upstream/src-unix/native/winsize.c
-          opam pin add notty ./notty-upstream -yn
-
       - name: Install dependencies
         run: opam install . --deps-only --with-test -y
 

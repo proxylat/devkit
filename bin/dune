@@ -2,4 +2,4 @@
  (public_name devkit)
  (name main)
  (modules main tui_front)
- (libraries devkit cmdliner unix notty.unix))
+  (libraries devkit cmdliner unix lambda-term lwt.unix))
