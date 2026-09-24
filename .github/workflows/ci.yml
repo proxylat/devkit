@@ -28,6 +28,17 @@ jobs:
       - name: Test
         run: opam exec -- dune runtest --force
 
+      - name: Diagnose test failures
+        if: failure()
+        shell: bash
+        run: |
+          opam exec -- dune --version
+          opam exec -- dune build
+          for t in dashboard bootstrap install proc update; do
+            echo "== test_$t =="
+            opam exec -- dune exec test/test_$t.exe && echo PASS || echo "FAIL exit=$?"
+          done
+
       - name: Upload windows exe
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
