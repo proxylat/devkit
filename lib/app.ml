@@ -95,6 +95,7 @@ type scan =
   { apps : app list
   ; info : Winget_parse.info Winget_parse.IdMap.t option
   ; winget : string
+  ; winget_error : string
   }
 
 (** [DEVKIT_TIMING=1] prints per-phase startup timings to stderr, so a
@@ -111,13 +112,14 @@ let timed (label : string) (f : unit -> 'a) : 'a =
 
 (** One scan + update check; the memoized [winget list] fetch is shared by
     both, so a command spawns winget once per 8s window. A failed ensure
-    degrades to winget-less operation (""). *)
+    degrades to winget-less operation ([""] + the error in
+    [winget_error]) instead of hiding the cause. *)
 let scan (e : env) ~(override_path : string) ~(extra : Plugin.tool list) : scan =
-  let winget =
+  let winget, winget_error =
     timed "ensure" (fun () ->
       match Bootstrap.ensure ~override_path e.bio with
-      | Ok w -> w
-      | Error _ -> "")
+      | Ok w -> w, ""
+      | Error err -> "", err)
   in
   let fetch, _ = Proc.winget_list e.run in
   let apps =
@@ -138,7 +140,7 @@ let scan (e : env) ~(override_path : string) ~(extra : Plugin.tool list) : scan 
           if Winget_parse.IdMap.is_empty fb then None else Some fb)
         else Some m)
   in
-  { apps; info; winget }
+  { apps; info; winget; winget_error }
 ;;
 
 let to_dashboard_apps (apps : app list) : Dashboard.app list =
@@ -148,7 +150,9 @@ let to_dashboard_apps (apps : app list) : Dashboard.app list =
 ;;
 
 (** Default view: scan, enrich, merge with the manifest, render plain
-    text. Returns the rendered dashboard (the TUI takes over on a tty). *)
+    text. Returns the rendered dashboard (the TUI takes over on a tty).
+    An empty scan appends what the winget resolution found, so a bare
+    dashboard never hides the cause. *)
 let default_view (e : env) ~(tools : Plugin.tool list) : string =
   let sections, winget_path = load_manifest e.fs Manifest.filename in
   let s = scan e ~override_path:winget_path ~extra:tools in
@@ -160,7 +164,18 @@ let default_view (e : env) ~(tools : Plugin.tool list) : string =
     timed "build" (fun () ->
       build_sections ~show ~run:(Some e.run) (to_dashboard_apps s.apps) sections s.info)
   in
-  render dash
+  let body = render dash in
+  if s.apps <> []
+  then body
+  else (
+    let winget =
+      if s.winget <> ""
+      then "winget: " ^ s.winget
+      else if s.winget_error <> ""
+      then "winget error: " ^ s.winget_error
+      else "winget: not found"
+    in
+    body ^ "\n  no installed software found\n  " ^ winget)
 ;;
 
 let import_view (e : env) ?(tools : Plugin.tool list = []) (path : string)

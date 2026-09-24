@@ -66,5 +66,6 @@ type line =
 val lines : state -> line list
 val render_line : line -> string
 val frame : state -> string list
+val set_message : state -> string -> state
 val apply_outcome : state -> string -> Install.outcome -> state
 val apply_updates : state -> (string * string) list -> state

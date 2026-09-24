@@ -2,7 +2,7 @@
 
     Resolution order: [# winget:] override → portable candidates walking
     up 4 levels from the cwd, then the exe dir → exe-adjacent [winget/]
-    subfolder → PATH lookup of ["winget"] (no [.exe]) → [cmd /c where
+    subfolder → PATH lookup of ["winget"] (+ [.exe] on Win32) → [cmd /c where
     winget] alias resolution with a [--version] probe →
     [%LOCALAPPDATA%/…/WindowsApps/winget.exe] with probe → cached
     [AppInstaller.exe] → download.
@@ -123,22 +123,31 @@ let find_portable ~is_file (base : string) : string =
   level base 4
 ;;
 
-(** PATH lookup for [name]. Splits on both [:] and [;] so fakes stay
-    platform-independent. *)
-let find_on_path ~getenv ~is_file (name : string) : string =
+(** PATH lookup for [name]. The separator is [;] on Win32 ([?] injected
+    for tests) and [:] elsewhere: splitting on both mangles drive-letter
+    dirs like [C:\…]. On Win32 each dir is also probed for [name.exe],
+    since the file on disk carries the extension. *)
+let find_on_path ?(os = Sys.os_type) ~getenv ~is_file (name : string) : string =
   let raw =
     match getenv "PATH" with
     | None -> ""
     | Some p -> p
   in
-  let dirs =
-    String.split_on_char ':' raw
-    |> List.concat_map (String.split_on_char ';')
-    |> List.filter (fun d -> d <> "")
+  let win = os = "Win32" || os = "Cygwin" in
+  let sep = if os = "Win32" then ';' else ':' in
+  let dirs = List.filter (fun d -> d <> "") (String.split_on_char sep raw) in
+  let names = if win then [ name; name ^ ".exe" ] else [ name ] in
+  let hit =
+    List.find_map
+      (fun d ->
+         List.find_map
+           (fun n ->
+              let p = Filename.concat d n in
+              if is_file p then Some p else None)
+           names)
+      dirs
   in
-  match List.find_opt (fun d -> is_file (Filename.concat d name)) dirs with
-  | None -> ""
-  | Some d -> Filename.concat d name
+  Option.value hit ~default:""
 ;;
 
 (** True when [path] answers [--version] with exit 0, or prints anything

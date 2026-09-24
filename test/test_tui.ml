@@ -162,6 +162,13 @@ let scroll () =
   Alcotest.(check int) "scroll back clamps" 0 s.Devkit.Tui.cursor
 ;;
 
+let set_message () =
+  let s = Tui.make (sections ()) ~height:10 ~width:80 in
+  let s = Tui.set_message s "installing b ..." in
+  Alcotest.(check (option string)) "footer" (Some "installing b ...") s.Tui.message;
+  Alcotest.(check bool) "logged" true (List.mem "installing b ..." s.Tui.log)
+;;
+
 let () =
   Alcotest.run
     "tui"
@@ -178,6 +185,7 @@ let () =
     ; ( "outcome"
       , [ Alcotest.test_case "success" `Quick apply_success
         ; Alcotest.test_case "failure keeps" `Quick apply_failure_keeps
+        ; Alcotest.test_case "set message" `Quick set_message
         ] )
     ; ( "frame"
       , [ Alcotest.test_case "shape" `Quick frame_shape

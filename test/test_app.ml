@@ -266,6 +266,20 @@ let default () =
   Alcotest.(check bool) "mentions app" true (contains "Git.Git" s)
 ;;
 
+let scan_error () =
+  let s = App.scan (env (Hashtbl.create 1)) ~override_path:"" ~extra:[] in
+  Alcotest.(check string) "no winget" "" s.App.winget;
+  Alcotest.(check bool) "error carried" true (s.App.winget_error <> "")
+;;
+
+let default_empty () =
+  let e =
+    { App.run = (fun _ _ -> None); fs = mem_fs (Hashtbl.create 1); bio = fake_bio () }
+  in
+  let s = App.default_view ~tools:[] e in
+  Alcotest.(check bool) "names winget" true (contains "winget" s)
+;;
+
 let () =
   Alcotest.run
     "app"
@@ -288,6 +302,8 @@ let () =
         ; Alcotest.test_case "export_except" `Quick export_except
         ; Alcotest.test_case "show" `Quick show
         ; Alcotest.test_case "default" `Quick default
+        ; Alcotest.test_case "scan error" `Quick scan_error
+        ; Alcotest.test_case "default empty" `Quick default_empty
         ] )
     ]
 ;;

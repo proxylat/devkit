@@ -18,6 +18,7 @@ type scan =
   { apps : Dashboard.app list
   ; info : Winget_parse.info Winget_parse.IdMap.t option
   ; winget : string
+  ; winget_error : string
   }
 
 (** Missing/unparseable file yields empty sections. *)
