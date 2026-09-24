@@ -115,7 +115,7 @@ let cargo_updates (fetch : Fetch.fetch) (versions : (string * string) list)
   =
   registry_updates
     fetch
-    [ "User-Agent", "devkit (https://github.com/anomalyco/devkit)" ]
+    [ "User-Agent", "devkit (https://github.com/proxylat/devkit)" ]
     (fun n -> Printf.sprintf "https://crates.io/api/v1/crates/%s" n)
     cargo_latest
     versions

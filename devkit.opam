@@ -6,8 +6,8 @@ description:
 maintainer: ["devkit contributors"]
 authors: ["devkit contributors"]
 license: "MIT"
-homepage: "https://github.com/anomalyco/devkit"
-bug-reports: "https://github.com/anomalyco/devkit/issues"
+homepage: "https://github.com/proxylat/devkit"
+bug-reports: "https://github.com/proxylat/devkit/issues"
 depends: [
   "ocaml" {>= "5.2"}
   "dune" {>= "3.24"}
@@ -37,5 +37,5 @@ build: [
     "@doc" {with-doc}
   ]
 ]
-dev-repo: "git+https://github.com/anomalyco/devkit.git"
+dev-repo: "git+https://github.com/proxylat/devkit.git"
 x-maintenance-intent: ["(latest)"]
