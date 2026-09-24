@@ -12,9 +12,13 @@ val format_ver : Manifest.item -> string
 (** Merge the machine scan with manifest sections into dashboard sections:
     "Pending updates", "Newly detected", then the manifest sections minus
     their updated items. [show] enriches NotFound winget items via
-    [winget show]. *)
+    [winget show]. [run] enables a single-spawn PATH probe: manifest
+    items whose candidate command is on PATH (but missed by every PM
+    scan) count as installed. Matching is candidate-based (full value,
+    basename, URL stem), not exact-id. *)
 val build_sections
   :  ?show:(string -> string option)
+  -> ?run:Proc.runner option
   -> app list
   -> Manifest.section list
   -> Winget_parse.info Winget_parse.IdMap.t option

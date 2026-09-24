@@ -14,3 +14,9 @@ val winget_list : runner -> (string -> string option) * (unit -> unit)
 (** Map [f] over [xs] on up to 8 domains, results in input order.
     Domain-safe as long as [f] touches no shared mutable state. *)
 val par_map8 : ('a -> 'b) -> 'a list -> 'b list
+
+(** PATH probe over candidate command names in a single spawn: a
+    [command -v] loop on Unix, one [where] call on Win32. Returns the
+    subset of [names] found on PATH. [os] defaults to [Sys.os_type] so
+    tests can exercise the Windows branch. *)
+val which : ?os:string -> runner -> string list -> string list

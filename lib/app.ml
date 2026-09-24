@@ -158,7 +158,7 @@ let default_view (e : env) ~(tools : Plugin.tool list) : string =
   in
   let dash =
     timed "build" (fun () ->
-      build_sections ~show (to_dashboard_apps s.apps) sections s.info)
+      build_sections ~show ~run:(Some e.run) (to_dashboard_apps s.apps) sections s.info)
   in
   render dash
 ;;
@@ -175,7 +175,14 @@ let import_view (e : env) ?(tools : Plugin.tool list = []) (path : string)
       let v = winget_show e.bio s.winget id in
       if v = "" then None else Some v
     in
-    Ok (render (build_sections ~show (to_dashboard_apps s.apps) r.sections s.info))
+    Ok
+      (render
+         (build_sections
+            ~show
+            ~run:(Some e.run)
+            (to_dashboard_apps s.apps)
+            r.sections
+            s.info))
 ;;
 
 (** [appendSelected]: persists items under a "Newly detected" section,
@@ -284,7 +291,9 @@ let run_append (e : env) ?(tools : Plugin.tool list = []) (ids : string list)
   else (
     let s = scan e ~override_path:"" ~extra:tools in
     let sections, _ = load_manifest e.fs Manifest.filename in
-    let dash = build_sections (to_dashboard_apps s.apps) sections s.info in
+    let dash =
+      build_sections ~run:(Some e.run) (to_dashboard_apps s.apps) sections s.info
+    in
     let items = new_items ~extra:true dash in
     if items = []
     then [ "  nothing new to append" ]
@@ -303,7 +312,9 @@ let run_append (e : env) ?(tools : Plugin.tool list = []) (ids : string list)
 let run_append_new (e : env) ~(tools : Plugin.tool list) : string list =
   let s = scan e ~override_path:"" ~extra:tools in
   let sections, _ = load_manifest e.fs Manifest.filename in
-  let dash = build_sections (to_dashboard_apps s.apps) sections s.info in
+  let dash =
+    build_sections ~run:(Some e.run) (to_dashboard_apps s.apps) sections s.info
+  in
   let items = new_items dash in
   if items = []
   then [ "  no newly detected apps" ]

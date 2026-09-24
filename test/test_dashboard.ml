@@ -154,6 +154,69 @@ let render_versions () =
   Alcotest.(check string) "neither" "" (Dashboard.format_ver (item Winget "x"))
 ;;
 
+let basename_match () =
+  (* scan name "bar" matches manifest "Foo.Bar" via basename candidate,
+     carrying the scanned version. *)
+  let manifest = [ { name = "Tools"; items = [ item Winget "Foo.Bar" ] } ] in
+  let apps = [ Dashboard.{ name = "bar"; version = "1.0"; pm = "winget" } ] in
+  let sections = Dashboard.build_sections apps manifest None in
+  Alcotest.(check int) "one section" 1 (List.length sections);
+  let it = List.nth (List.nth sections 0).items 0 in
+  Alcotest.(check string) "version carried" "1.0" it.installed_version;
+  match it.status with
+  | Installed -> ()
+  | _ -> Alcotest.fail "basename should match"
+;;
+
+let url_stem_match () =
+  (* installer filename stem matches the scanned tool name. *)
+  let manifest =
+    [ { name = "Tools"; items = [ item Url "https://example.com/dl/widget-2.0.exe" ] } ]
+  in
+  let apps = [ Dashboard.{ name = "widget-2.0"; version = "2.0"; pm = "manual" } ] in
+  let sections = Dashboard.build_sections apps manifest None in
+  let it = List.nth (List.nth sections 0).items 0 in
+  match it.status with
+  | Installed -> ()
+  | _ -> Alcotest.fail "url stem should match"
+;;
+
+let path_probe_rescue () =
+  (* nothing in any PM scan, but the command is on PATH: Installed with
+     no version, in a single spawn. *)
+  let manifest = [ { name = "Tools"; items = [ item GitHub "owner/gizmo" ] } ] in
+  let calls = ref 0 in
+  let run prog args =
+    incr calls;
+    match prog, args with
+    | "sh", [ "-c"; _ ] -> Some "gizmo\n"
+    | _ -> None
+  in
+  let sections = Dashboard.build_sections ~run:(Some run) [] manifest None in
+  Alcotest.(check int) "single spawn" 1 !calls;
+  let it = List.nth (List.nth sections 0).items 0 in
+  Alcotest.(check string) "no version" "" it.installed_version;
+  match it.status with
+  | Installed -> ()
+  | _ -> Alcotest.fail "PATH hit should be Installed"
+;;
+
+let path_probe_miss () =
+  (* no scan hit, nothing on PATH: Manual stays Manual, probe still one spawn. *)
+  let manifest = [ { name = "Tools"; items = [ item GitHub "owner/gizmo" ] } ] in
+  let calls = ref 0 in
+  let run _ _ =
+    incr calls;
+    Some ""
+  in
+  let sections = Dashboard.build_sections ~run:(Some run) [] manifest None in
+  Alcotest.(check int) "single spawn" 1 !calls;
+  let it = List.nth (List.nth sections 0).items 0 in
+  match it.status with
+  | Manual -> ()
+  | _ -> Alcotest.fail "PATH miss should stay Manual"
+;;
+
 let () =
   Alcotest.run
     "dashboard"
@@ -162,6 +225,10 @@ let () =
         ; Alcotest.test_case "winget artifact dropped" `Quick winget_artifact_dropped
         ; Alcotest.test_case "show fallback" `Quick show_fallback
         ; Alcotest.test_case "show fallback many" `Quick show_fallback_many
+        ; Alcotest.test_case "basename match" `Quick basename_match
+        ; Alcotest.test_case "url stem match" `Quick url_stem_match
+        ; Alcotest.test_case "PATH probe rescue" `Quick path_probe_rescue
+        ; Alcotest.test_case "PATH probe miss" `Quick path_probe_miss
         ] )
     ; ( "render"
       , [ Alcotest.test_case "exact fixture" `Quick render_fixture

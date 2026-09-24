@@ -51,3 +51,7 @@
 (test
  (name test_tui)
  (libraries devkit alcotest))
+
+(test
+ (name test_proc)
+ (libraries devkit alcotest))
