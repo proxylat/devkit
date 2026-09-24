@@ -147,6 +147,10 @@ let draw_all (term : LTerm.t) (st : Tui.state) : unit Lwt.t =
 ;;
 
 let run ~(tools : Plugin.tool list) (env : App.env) : unit =
+  (* The scan below spawns winget + 4 PMs (~2s on Windows) before the
+     first frame draws; stderr stays visible so the wait looks alive. *)
+  prerr_endline "scanning installed software...";
+  flush stderr;
   let sections, winget_path = App.load_manifest env.App.fs Manifest.filename in
   let s = App.scan env ~override_path:winget_path ~extra:tools in
   let show id =

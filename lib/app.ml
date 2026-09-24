@@ -154,6 +154,10 @@ let to_dashboard_apps (apps : app list) : Dashboard.app list =
     An empty scan appends what the winget resolution found, so a bare
     dashboard never hides the cause. *)
 let default_view (e : env) ~(tools : Plugin.tool list) : string =
+  (* Slow spawns (winget list) run after this; stderr stays visible
+     past the TUI's alternate screen, so the wait looks alive. *)
+  prerr_endline "scanning installed software...";
+  flush stderr;
   let sections, winget_path = load_manifest e.fs Manifest.filename in
   let s = scan e ~override_path:winget_path ~extra:tools in
   let show id =
