@@ -15,19 +15,32 @@ let kind_of : Manifest.item_type -> string = function
   | Manifest.Pm s -> s
 ;;
 
+let color_attr : Tui.color -> attr = function
+  | Tui.Plain -> A.empty
+  | Tui.Green -> A.(fg green)
+  | Tui.Yellow -> A.(fg yellow)
+  | Tui.Red -> A.(fg red)
+  | Tui.Cyan -> A.(fg cyan)
+;;
+
 let draw (st : Tui.state) : image =
-  let lines = Tui.frame st in
+  let rows = Tui.visible st in
   let img_of_line i line =
-    let attr =
-      if i = 0
-      then A.(st bold)
-      else if String.length line >= 2 && String.sub line 0 2 = "> "
-      then A.(st reverse)
-      else A.empty
-    in
-    I.string attr line
+    if i = 0
+    then I.string A.(st bold) line
+    else if i = 1
+    then I.string A.empty line
+    else (
+      match List.nth_opt rows (i - 2) with
+      | None -> I.string A.empty line
+      | Some e ->
+        let attr = color_attr (Tui.color_of e.Tui.item.Manifest.status) in
+        let attr =
+          if st.Tui.offset + i - 2 = st.Tui.cursor then A.(attr ++ st reverse) else attr
+        in
+        I.string attr line)
   in
-  I.vcat (List.mapi img_of_line lines)
+  I.vcat (List.mapi img_of_line (Tui.frame st))
 ;;
 
 type ev =
@@ -51,6 +64,8 @@ let nav : ev -> Tui.action option = function
   | `Key (`Page `Down, _) -> Some Tui.Page_down
   | `Key (`Home, _) -> Some Tui.Home
   | `Key (`End, _) -> Some Tui.End
+  | `Mouse (`Press (`Scroll `Up), _, _) -> Some Tui.Scroll_up
+  | `Mouse (`Press (`Scroll `Down), _, _) -> Some Tui.Scroll_down
   | _ -> None
 ;;
 

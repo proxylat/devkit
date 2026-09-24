@@ -28,12 +28,26 @@ type action =
   | Down
   | Page_up
   | Page_down
+  | Scroll_up
+  | Scroll_down
   | Home
   | End
   | Quit
 
 val step : state -> action -> state
 val selected : state -> entry option
+
+(** Row color by status, for the frontend to map to terminal colors:
+    green = installed, yellow = needs update, red = missing,
+    cyan = newly detected, plain = manual links. *)
+type color =
+  | Plain
+  | Green
+  | Yellow
+  | Red
+  | Cyan
+
+val color_of : status -> color
 
 type enter =
   | Do_install of item

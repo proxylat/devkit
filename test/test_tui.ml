@@ -114,6 +114,24 @@ let frame_shape () =
      String.length row >= 2 && String.sub row 0 2 = "> ")
 ;;
 
+let colors () =
+  let open Devkit.Tui in
+  let open Devkit.Manifest in
+  Alcotest.(check bool) "installed green" true (color_of Installed = Green);
+  Alcotest.(check bool) "update yellow" true (color_of NeedsUpdate = Yellow);
+  Alcotest.(check bool) "missing red" true (color_of NotFound = Red);
+  Alcotest.(check bool) "new cyan" true (color_of New = Cyan);
+  Alcotest.(check bool) "manual plain" true (color_of Manual = Plain)
+;;
+
+let scroll () =
+  let s = Devkit.Tui.make (sections ()) ~height:2 ~width:80 in
+  let s = Devkit.Tui.step s Devkit.Tui.Scroll_down in
+  Alcotest.(check int) "scroll moves 3" 2 s.Devkit.Tui.cursor;
+  let s = Devkit.Tui.step s Devkit.Tui.Scroll_up in
+  Alcotest.(check int) "scroll back clamps" 0 s.Devkit.Tui.cursor
+;;
+
 let () =
   Alcotest.run
     "tui"
@@ -121,6 +139,7 @@ let () =
     ; ( "nav"
       , [ Alcotest.test_case "clamp" `Quick nav_clamp
         ; Alcotest.test_case "paging" `Quick paging
+        ; Alcotest.test_case "scroll" `Quick scroll
         ] )
     ; ( "enter"
       , [ Alcotest.test_case "mapping" `Quick enter_mapping
@@ -130,6 +149,9 @@ let () =
       , [ Alcotest.test_case "success" `Quick apply_success
         ; Alcotest.test_case "failure keeps" `Quick apply_failure_keeps
         ] )
-    ; "frame", [ Alcotest.test_case "shape" `Quick frame_shape ]
+    ; ( "frame"
+      , [ Alcotest.test_case "shape" `Quick frame_shape
+        ; Alcotest.test_case "colors" `Quick colors
+        ] )
     ]
 ;;

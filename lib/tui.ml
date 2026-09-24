@@ -69,6 +69,8 @@ type action =
   | Down
   | Page_up
   | Page_down
+  | Scroll_up
+  | Scroll_down
   | Home
   | End
   | Quit
@@ -80,6 +82,8 @@ let step (s : state) (a : action) : state =
     | Down -> s.cursor + 1
     | Page_up -> s.cursor - s.height
     | Page_down -> s.cursor + s.height
+    | Scroll_up -> s.cursor - 3
+    | Scroll_down -> s.cursor + 3
     | Home -> 0
     | End -> max_cursor s
     | Quit -> s.cursor
@@ -104,6 +108,22 @@ let enter_action (s : state) : enter =
      | NeedsUpdate | NotFound -> Do_install e.item
      | Manual -> Do_open e.item.value
      | Installed | New -> Do_nothing)
+;;
+
+(** Row color by install status; the frontend maps this to terminal colors. *)
+type color =
+  | Plain
+  | Green
+  | Yellow
+  | Red
+  | Cyan
+
+let color_of : status -> color = function
+  | Installed -> Green
+  | NeedsUpdate -> Yellow
+  | NotFound -> Red
+  | New -> Cyan
+  | Manual -> Plain
 ;;
 
 let symbol : status -> string = function
