@@ -13,7 +13,7 @@ lambda-term lwt ocamlformat`.
 eval $(opam env --switch=system)
 dune build
 dune runtest          # 129 alcotests, must stay green
-dune exec bin/main.exe -- --help
+dune exec devkit -- --help
 ```
 
 Without `eval $(opam env ...)`, the shell finds the wrong dune

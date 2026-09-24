@@ -42,12 +42,16 @@ jobs:
             opam exec -- dune exec test/test_$t.exe && echo PASS || echo "FAIL exit=$?"
           done
 
+      - name: Rename exe to devkit.exe
+        if: matrix.os == 'windows-latest'
+        run: cp _build/default/bin/main.exe _build/default/bin/devkit.exe
+
       - name: Upload windows exe
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: devkit-windows
-          path: _build/default/bin/main.exe
+          path: _build/default/bin/devkit.exe
 
   fmt:
     runs-on: ubuntu-latest
