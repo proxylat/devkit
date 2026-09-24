@@ -345,15 +345,24 @@ let order_for (tools : Plugin.tool list) : string list =
       (List.map (fun (t : Plugin.tool) -> t.name) tools)
 ;;
 
-let run_export (e : env) ?(tools : Plugin.tool list = []) (output : string) : string list =
+let run_export
+      (e : env)
+      ?(tools : Plugin.tool list = [])
+      ?(only : string list = [])
+      ?(except : string list = [])
+      (output : string)
+  : string list
+  =
   let s = scan e ~override_path:"" ~extra:tools in
-  if s.apps = []
+  let keep pm = (only = [] || List.mem pm only) && not (List.mem pm except) in
+  let apps = List.filter (fun (a : app) -> keep a.pm) s.apps in
+  if apps = []
   then [ "  no installed software found" ]
   else (
     let sections =
       List.filter_map
         (fun pm ->
-           let apps = List.filter (fun (a : app) -> a.pm = pm) s.apps in
+           let apps = List.filter (fun (a : app) -> a.pm = pm) apps in
            match apps with
            | [] -> None
            | _ ->
@@ -373,14 +382,14 @@ let run_export (e : env) ?(tools : Plugin.tool list = []) (output : string) : st
     | Error e -> [ "  error: " ^ e ]
     | Ok () ->
       let json_path = json_sibling output in
-      let winget_apps = List.filter (fun (a : app) -> a.pm = "winget") s.apps in
-      let base = Printf.sprintf "wrote %s (%d apps)" output (List.length s.apps) in
+      let winget_apps = List.filter (fun (a : app) -> a.pm = "winget") apps in
+      let base = Printf.sprintf "wrote %s (%d apps)" output (List.length apps) in
       (* An empty Packages list violates the schema (minItems 1) and
            winget import would reject it, so the file is skipped instead. *)
       if winget_apps = []
       then [ base; "  no winget apps, json skipped" ]
       else (
-        match e.fs.write_file json_path (Winget_json.to_string s.apps) with
+        match e.fs.write_file json_path (Winget_json.to_string apps) with
         | Error e -> [ base; "  winget json skipped: " ^ e ]
         | Ok () ->
           [ base

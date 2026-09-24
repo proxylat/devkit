@@ -34,4 +34,11 @@ val run_append : env -> ?tools:Plugin.tool list -> string list -> string list
 val run_append_new : env -> tools:Plugin.tool list -> string list
 val json_sibling : string -> string
 val order_for : Plugin.tool list -> string list
-val run_export : env -> ?tools:Plugin.tool list -> string -> string list
+
+val run_export
+  :  env
+  -> ?tools:Plugin.tool list
+  -> ?only:string list
+  -> ?except:string list
+  -> string
+  -> string list

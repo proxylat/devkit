@@ -128,14 +128,28 @@ let export_cmd =
       & opt string Manifest.filename
       & info [ "o"; "output" ] ~docv:"FILE" ~doc:"output file path")
   in
-  let run output =
-    print_lines (App.run_export ~tools:(load_tools ()) (make_env ()) output)
+  let only =
+    Cmdliner.Arg.(
+      value
+      & opt (list string) []
+      & info [ "only" ] ~docv:"PM,..." ~doc:"export only these package managers")
+  in
+  let except =
+    Cmdliner.Arg.(
+      value
+      & opt (list string) []
+      & info [ "except" ] ~docv:"PM,..." ~doc:"skip these package managers")
+  in
+  let run output only except =
+    print_lines (App.run_export ~tools:(load_tools ()) (make_env ()) ~only ~except output)
   in
   Cmdliner.Cmd.v
     (Cmdliner.Cmd.info
        "export"
-       ~doc:"Scan PC and write all installed software to devkit.toml")
-    Cmdliner.Term.(const run $ output)
+       ~doc:
+         "Scan PC and write installed software to devkit.toml (filter with \
+          --only/--except)")
+    Cmdliner.Term.(const run $ output $ only $ except)
 ;;
 
 let () =

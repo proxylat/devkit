@@ -35,12 +35,15 @@ devkit                    # dashboard: manifest status, or full scan
 devkit import FILE        # preview a manifest against this machine
 devkit add ID...          # append installed apps to devkit.toml
 devkit append [--new]     # append newly-detected apps (or given ids)
-devkit export [-o FILE]   # write devkit.toml + winget import-ready JSON
+devkit export [-o FILE] [--only PM,...] [--except PM,...]
+  # write devkit.toml + winget import-ready JSON
 ```
 
 `export` writes two files: the TOML manifest (`devkit.toml`) and a
 `winget import -i`-compatible JSON sibling (schema 2.0.0, installed
 versions pinned; skipped when no winget apps are installed).
+`--only npm,uv` / `--except winget` restrict both files to the given
+package managers.
 
 ## Custom package managers (`tools.sexp`)
 
