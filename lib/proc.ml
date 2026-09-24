@@ -53,6 +53,63 @@ let par_map8 (f : 'a -> 'b) (xs : 'a list) : 'b list =
     List.concat_map Domain.join doms)
 ;;
 
+(** PATH probe over candidate command names in a single spawn. Unix
+    runs one [sh] loop over [command -v] (a shell builtin, so this is
+    one fork); Win32 runs one [where] call, forcing exit 0 because
+    [where] fails when any name is missing. [where] prints paths, so
+    hits map back by lowercased basename without extension. *)
+let quote_sh s = "'" ^ String.concat "'\\''" (String.split_on_char '\'' s) ^ "'"
+
+let win_basename line =
+  let base =
+    match String.rindex_opt line '\\' with
+    | Some i -> String.sub line (i + 1) (String.length line - i - 1)
+    | None ->
+      (match String.rindex_opt line '/' with
+       | Some i -> String.sub line (i + 1) (String.length line - i - 1)
+       | None -> line)
+  in
+  let stem =
+    match String.rindex_opt base '.' with
+    | Some i -> String.sub base 0 i
+    | None -> base
+  in
+  String.lowercase_ascii (String.trim stem)
+;;
+
+let which ?(os = Sys.os_type) (run : runner) (names : string list) : string list =
+  let names = List.sort_uniq String.compare (List.filter (fun s -> s <> "") names) in
+  if names = []
+  then []
+  else if os = "Win32" || os = "Cygwin"
+  then (
+    let args = List.map (fun n -> "\"" ^ n ^ "\"") names in
+    match run "cmd" [ "/c"; "where " ^ String.concat " " args ^ " 2>nul || exit 0" ] with
+    | None -> []
+    | Some out ->
+      let hits =
+        List.filter_map
+          (fun line ->
+             let stem = win_basename (String.trim line) in
+             if List.mem stem names then Some stem else None)
+          (String.split_on_char '\n' out)
+      in
+      List.sort_uniq String.compare hits)
+  else (
+    (* The loop exits nonzero when the last candidate misses; force
+       success because hits arrive on stdout (default_runner drops
+       non-zero output entirely). *)
+    let script =
+      "for c in "
+      ^ String.concat " " (List.map quote_sh names)
+      ^ "; do command -v \"$c\" >/dev/null 2>&1 && printf '%s\\n' \"$c\"; done; exit 0"
+    in
+    match run "sh" [ "-c"; script ] with
+    | None -> []
+    | Some out ->
+      List.filter (fun line -> List.mem line names) (String.split_on_char '\n' out))
+;;
+
 (** Memoized [winget list --verbose] fetcher with resetter. The
     inventory scan and the update check share one [winget list]
     invocation per 8s window, so refresh ticks never pop extra winget

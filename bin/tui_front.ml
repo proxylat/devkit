@@ -125,7 +125,9 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
     | "" -> None
     | v -> Some v
   in
-  let dash = Dashboard.build_sections ~show s.App.apps sections s.App.info in
+  let dash =
+    Dashboard.build_sections ~show ~run:(Some env.App.run) s.App.apps sections s.App.info
+  in
   let fetch = Fetch.curl_fetch Proc.default_runner in
   let deps = Install.real_deps fetch ~winget_override:winget_path () in
   let final =

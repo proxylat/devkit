@@ -31,6 +31,57 @@ let format_ver (it : item) : string =
   else " " ^ it.installed_version
 ;;
 
+(** Candidate scan-names for a manifest value: the full lowercased value
+    plus a short form. Dotted/slashed ids ([Git.Git], [owner/tool])
+    collapse to their last segment; URLs contribute the filename and
+    its stem (no query/fragment/extension). The PM scan or PATH probe
+    sees command names, not publisher prefixes or installer URLs. *)
+let after_last seps s =
+  let idx =
+    let rec go i =
+      if i < 0 then None else if List.mem s.[i] seps then Some i else go (i - 1)
+    in
+    go (String.length s - 1)
+  in
+  match idx with
+  | None -> s
+  | Some i -> String.sub s (i + 1) (String.length s - i - 1)
+;;
+
+let cut_at chars s =
+  let idx =
+    let rec go i =
+      if i >= String.length s
+      then None
+      else if List.mem s.[i] chars
+      then Some i
+      else go (i + 1)
+    in
+    go 0
+  in
+  match idx with
+  | None -> s
+  | Some i -> String.sub s 0 i
+;;
+
+let strip_ext s =
+  match String.rindex_opt s '.' with
+  | None -> s
+  | Some i -> String.sub s 0 i
+;;
+
+let candidates (it : item) : string list =
+  let v = String.lowercase_ascii it.value in
+  let shorts =
+    match it.typ with
+    | Url ->
+      let file = cut_at [ '?'; '#' ] (after_last [ '/'; '\\' ] v) in
+      [ file; strip_ext file ]
+    | Winget | GitHub | Pm _ -> [ after_last [ '.'; '/'; '\\' ] v ]
+  in
+  List.sort_uniq String.compare (List.filter (fun s -> s <> "") (v :: shorts))
+;;
+
 (** Merge the machine scan with manifest sections into dashboard sections:
     1. "Pending updates": manifest items needing update, plus
        non-manifest installed apps that have an Available version.
@@ -40,6 +91,7 @@ let format_ver (it : item) : string =
     leftover artifact, never real content). *)
 let build_sections
       ?(show : string -> string option = fun _ -> None)
+      ?(run : Proc.runner option = None)
       (apps : app list)
       (pkgs_sections : section list)
       (winget_info : Winget_parse.info Winget_parse.IdMap.t option)
@@ -48,6 +100,20 @@ let build_sections
   let lower s = String.lowercase_ascii s in
   let scan_lookup : (string, app) Hashtbl.t = Hashtbl.create 64 in
   List.iter (fun a -> Hashtbl.replace scan_lookup (lower a.name) a) apps;
+  (* PATH probe: one spawn over every candidate of every manifest item.
+     Skipped entirely when no runner is passed (tests, offline use). *)
+  let on_path : (string, unit) Hashtbl.t = Hashtbl.create 64 in
+  (match run with
+   | None -> ()
+   | Some run ->
+     let cands =
+       List.concat_map (fun sec -> List.concat_map candidates sec.items) pkgs_sections
+     in
+     List.iter (fun n -> Hashtbl.replace on_path n ()) (Proc.which run cands));
+  let scan_hit (it : item) : app option =
+    List.find_map (fun c -> Hashtbl.find_opt scan_lookup c) (candidates it)
+  in
+  let path_hit (it : item) : bool = List.exists (Hashtbl.mem on_path) (candidates it) in
   let info_of name =
     match winget_info with
     | None -> None
@@ -63,7 +129,7 @@ let build_sections
                (fun it ->
                   let name = lower it.value in
                   let it =
-                    match Hashtbl.find_opt scan_lookup name with
+                    match scan_hit it with
                     | Some a ->
                       { it with installed_version = a.version; status = Installed }
                     | None -> it
@@ -87,10 +153,10 @@ let build_sections
                   let it =
                     if it.status <> Installed && it.status <> NeedsUpdate
                     then (
-                      match Hashtbl.find_opt scan_lookup name with
+                      match scan_hit it with
                       | Some a ->
                         { it with installed_version = a.version; status = Installed }
-                      | None -> it)
+                      | None -> if path_hit it then { it with status = Installed } else it)
                     else it
                   in
                   if it.typ = Winget && it.status = Installed
@@ -138,8 +204,7 @@ let build_sections
                     | None | Some None -> it
                     | Some (Some ver) ->
                       let it = { it with available_version = ver } in
-                      let name = lower it.value in
-                      (match Hashtbl.find_opt scan_lookup name with
+                      (match scan_hit it with
                        | Some a ->
                          { it with
                            installed_version = a.version
