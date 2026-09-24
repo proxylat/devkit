@@ -105,10 +105,7 @@ let timed (label : string) (f : unit -> 'a) : 'a =
   | Some _ ->
     let t0 = Unix.gettimeofday () in
     let r = f () in
-    Printf.eprintf
-      "[timing] %s: %.0fms\n%!"
-      label
-      ((Unix.gettimeofday () -. t0) *. 1000.0);
+    Printf.eprintf "[timing] %s: %.0fms\n%!" label ((Unix.gettimeofday () -. t0) *. 1000.0);
     r
 ;;
 
@@ -124,7 +121,8 @@ let scan (e : env) ~(override_path : string) ~(extra : Plugin.tool list) : scan 
   in
   let fetch, _ = Proc.winget_list e.run in
   let apps =
-    timed "scan_all" (fun () -> Inventory.scan_all e.run ~winget:(fun () -> fetch winget) ~extra)
+    timed "scan_all" (fun () ->
+      Inventory.scan_all e.run ~winget:(fun () -> fetch winget) ~extra)
   in
   let info =
     timed "info" (fun () ->
@@ -159,7 +157,8 @@ let default_view (e : env) ~(tools : Plugin.tool list) : string =
     if v = "" then None else Some v
   in
   let dash =
-    timed "build" (fun () -> build_sections ~show (to_dashboard_apps s.apps) sections s.info)
+    timed "build" (fun () ->
+      build_sections ~show (to_dashboard_apps s.apps) sections s.info)
   in
   render dash
 ;;

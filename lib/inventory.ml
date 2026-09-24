@@ -257,11 +257,10 @@ let scan_all
   : app list
   =
   let winget_dom =
-    Domain.spawn
-      (fun () ->
-         match winget () with
-         | None -> []
-         | Some out -> parse_winget out)
+    Domain.spawn (fun () ->
+      match winget () with
+      | None -> []
+      | Some out -> parse_winget out)
   in
   let apps =
     List.concat
