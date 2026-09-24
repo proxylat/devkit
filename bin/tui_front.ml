@@ -126,6 +126,10 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
        >>= fun mode ->
        LTerm.hide_cursor term
        >>= fun () ->
+       (* Alternate screen: redraws paint off-scrollback, and exiting
+          restores the shell view (like the old notty frontend). *)
+       LTerm.save_state term
+       >>= fun () ->
        let geom = LTerm.size term in
        let vw, vh = viewport geom.LTerm_geom.cols geom.LTerm_geom.rows in
        let rec loop (st : Tui.state) : Tui.state Lwt.t =
@@ -144,6 +148,8 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
        in
        loop (Tui.make dash ~height:vh ~width:vw)
        >>= fun st ->
+       LTerm.load_state term
+       >>= fun () ->
        LTerm.leave_raw_mode term mode
        >>= fun () -> LTerm.show_cursor term >>= fun () -> Lwt.return st)
   in
