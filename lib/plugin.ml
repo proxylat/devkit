@@ -3,7 +3,7 @@
     A tool is a named program devkit can scan (like the built-in npm,
     pipx, uv and cargo support) plus optional install/upgrade command
     templates. Tools live in s-expression files: [tools.sexp] next to
-    [pkgs.txt] first, then the user config dir: the first file wins per
+    devkit.toml first, then the user config dir: the first file wins per
     tool name, and a custom tool may not shadow a built-in name.
 
     File format:
@@ -352,7 +352,7 @@ let config_file () : string option =
         | _ -> None))
 ;;
 
-(** Search order: [tools.sexp] next to [pkgs.txt], then the config file. *)
+(** Search order: [tools.sexp] next to devkit.toml, then the config file. *)
 let default_paths () : string list =
   match config_file () with
   | None -> [ "tools.sexp" ]

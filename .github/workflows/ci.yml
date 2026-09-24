@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.5
+          dune-cache: true
+
+      # Release notty caps ocaml < 5.4; master builds on 5.5 with one
+      # extra record field (ci/notty-ocaml55.patch).
+      - name: Pin patched notty
+        run: |
+          git clone --depth 50 https://github.com/pqwy/notty.git notty-upstream
+          git -C notty-upstream apply ci/notty-ocaml55.patch
+          opam pin add notty ./notty-upstream -yn
+
+      - name: Install dependencies
+        run: opam install . --deps-only --with-test -y
+
+      - name: Build
+        run: opam exec -- dune build
+
+      - name: Test
+        run: opam exec -- dune runtest --force
+
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.5
+
+      - name: Check formatting
+        run: |
+          opam install ocamlformat.0.29.0 -y
+          opam exec -- sh -c 'ocamlformat --check $(find lib test bin -name "*.ml" -o -name "*.mli")'

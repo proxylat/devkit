@@ -1,0 +1,28 @@
+# notty on OCaml >= 5.4: Format.formatter_out_functions gained an
+# out_width field and upstream master does not set it yet. Apply after
+# cloning pqwy/notty master:
+#
+#   git clone https://github.com/pqwy/notty.git
+#   git -C notty apply /path/to/ci/notty-ocaml55.patch
+#   opam pin add notty ./notty -yn
+#
+# The implementation counts UTF-8 leading bytes in the slice, which is
+# the scalar-value count Format documents as the reasonable default.
+diff --git a/src/notty.ml b/src/notty.ml
+index 7385083..1ea50e5 100644
+--- a/src/notty.ml
++++ b/src/notty.ml
+@@ -390,6 +390,13 @@ module I = struct
+             img := !img <-> !line; line := void 0 1)
+         ; out_string = (fun s i n ->
+             line := !line <|> string (top_a attr) String.(sub0cp s i n))
++        (* Width of the substring as scalar count (Format.out_width, OCaml >= 5.4). *)
++        ; out_width = (fun s ~pos ~len ->
++            let n = ref 0 in
++            for i = pos to pos + len - 1 do
++              if Char.code s.[i] land 0xC0 <> 0x80 then incr n
++            done;
++            !n)
+         (* Not entirely clear; either or both could be void: *)
+         ; out_spaces = (fun w -> line := !line <|> char (top_a attr) ' ' w 1)
+         ; out_indent = (fun w -> line := !line <|> char (top_a attr) ' ' w 1)

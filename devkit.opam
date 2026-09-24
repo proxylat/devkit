@@ -2,7 +2,7 @@
 opam-version: "2.0"
 synopsis: "Cross package-manager inventory dashboard"
 description:
-  "Scan your PC for installed software across package managers, merge the result with a pkgs.txt manifest, and export a restore-ready snapshot."
+  "Scan your PC for installed software across package managers, merge the result with a devkit.toml manifest, and export a restore-ready snapshot."
 maintainer: ["devkit contributors"]
 authors: ["devkit contributors"]
 license: "MIT"
@@ -17,6 +17,8 @@ depends: [
   "decompress" {>= "1.5"}
   "sexplib" {>= "0.17"}
   "re" {>= "1.11"}
+  "toml" {>= "7.0"}
+  "notty" {>= "0.2.3"}
   "alcotest" {>= "1.7" & with-test}
   "odoc" {with-doc}
 ]

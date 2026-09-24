@@ -1,9 +1,13 @@
-(** Manifest (pkgs.txt) parsing. *)
+(** Manifest (devkit.toml) parsing and rendering. *)
+
+(** The manifest file name, resolved from the working directory. *)
+val filename : string
 
 type item_type =
   | Winget
   | GitHub
   | Url
+  | Pm of string
 
 type status =
   | Installed
@@ -31,4 +35,7 @@ type parse_result =
   }
 
 val make_item : item_type -> string -> item
+val type_string : item_type -> string
+val item_type_of_string : string -> item_type
 val parse : string -> parse_result
+val to_string : parse_result -> string
