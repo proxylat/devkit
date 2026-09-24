@@ -3,8 +3,10 @@
     Draws {!Devkit.Tui.frame} lines, feeds key events in, runs installs
     on Enter. On exit the plain-text dashboard plus the install log go
     to stdout, so redirected output stays usable. Lambda-term (unlike
-    notty) has a real Windows backend, so this frontend serves both
-    OSes. Installs run synchronously and freeze the UI while they run.
+    notty) has a real Windows backend, so this frontend     serves both
+    OSes. Installs and update checks run synchronously (the event loop
+    freezes) but paint a status line first, so the screen states what is
+    running instead of looking dead.
     Mouse reporting is on for wheel-scroll only; other mouse events are
     ignored. *)
 
@@ -89,30 +91,44 @@ let kind_of : Manifest.item_type -> string = function
   | Manifest.Pm s -> s
 ;;
 
-let press_enter (deps : Install.deps) (st : Tui.state) : Tui.state =
+let press_enter ~draw (deps : Install.deps) (st : Tui.state) : Tui.state Lwt.t =
   match Tui.enter_action st with
-  | Tui.Do_nothing -> st
+  | Tui.Do_nothing -> Lwt.return st
   | Tui.Do_install item ->
     let update = item.Manifest.status = Manifest.NeedsUpdate in
-    let o = Install.install deps (kind_of item.Manifest.typ) item.Manifest.value update in
-    Tui.apply_outcome st item.Manifest.value o
+    draw (Tui.set_message st ("installing " ^ item.Manifest.value ^ " ..."))
+    >>= fun () ->
+    (* Let the repaint reach the screen before the blocking call. *)
+    Lwt.pause ()
+    >>= fun () ->
+    Lwt.return
+      (Tui.apply_outcome
+         st
+         item.Manifest.value
+         (Install.install deps (kind_of item.Manifest.typ) item.Manifest.value update))
   | Tui.Do_open url ->
     (match deps.Install.open_browser url with
      | Ok () ->
        let o = { Install.value = url; status = Install.Opened } in
-       Tui.apply_outcome st url o
+       Lwt.return (Tui.apply_outcome st url o)
      | Error e ->
        let o = { Install.value = url; status = Install.Failed e } in
-       Tui.apply_outcome st url o)
+       Lwt.return (Tui.apply_outcome st url o))
 ;;
 
 let viewport (w : int) (h : int) : int * int = max 1 w, max 1 (h - 3)
 
 (** [u]: check npm/pipx/uv/cargo updates for the Installed rows, then
-    mark the hits. Runs synchronously like installs (UI freezes). *)
-let press_u (run : Proc.runner) (fetch : Fetch.fetch) (st : Tui.state) : Tui.state =
+    mark the hits. Paints a status line first, then runs synchronously
+    like installs (UI freezes). *)
+let press_u ~draw (run : Proc.runner) (fetch : Fetch.fetch) (st : Tui.state)
+  : Tui.state Lwt.t
+  =
   let items = List.map (fun e -> e.Tui.item) st.Tui.entries in
-  Tui.apply_updates st (Update.check_all ~run ~fetch items)
+  draw (Tui.set_message st "checking updates ...")
+  >>= fun () ->
+  Lwt.pause ()
+  >>= fun () -> Lwt.return (Tui.apply_updates st (Update.check_all ~run ~fetch items))
 ;;
 
 (** Repaint in place, one addressed line at a time: no full-screen
@@ -168,8 +184,8 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
          match classify ev with
          | Quit -> Lwt.return st
          | Nothing -> wait_loop st
-         | Enter -> draw_loop (press_enter deps st)
-         | Update -> draw_loop (press_u env.App.run fetch st)
+         | Enter -> press_enter ~draw:(draw_all term) deps st >>= draw_loop
+         | Update -> press_u ~draw:(draw_all term) env.App.run fetch st >>= draw_loop
          | Action a -> draw_loop (Tui.step st a)
          | Resized g ->
            LTerm.clear_screen term
@@ -177,7 +193,20 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
            let vw, vh = viewport g.LTerm_geom.cols g.LTerm_geom.rows in
            draw_loop (Tui.resize st ~height:vh ~width:vw)
        in
-       draw_loop (Tui.make dash ~height:vh ~width:vw)
+       let init = Tui.make dash ~height:vh ~width:vw in
+       let init =
+         if s.App.apps = []
+         then
+           Tui.set_message
+             init
+             (if s.App.winget <> ""
+              then "empty scan; winget at " ^ s.App.winget
+              else if s.App.winget_error <> ""
+              then "empty scan; " ^ s.App.winget_error
+              else "empty scan; winget not found")
+         else init
+       in
+       draw_loop init
        >>= fun st ->
        LTerm.disable_mouse term
        >>= fun () ->
@@ -187,5 +216,26 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
        >>= fun () -> LTerm.show_cursor term >>= fun () -> Lwt.return st)
   in
   print_string (Dashboard.render dash);
-  List.iter print_endline final.Tui.log
+  List.iter print_endline final.Tui.log;
+  (* An empty scan behind a double-clicked window would vanish with the
+     console: leave the diagnostics readable until a keypress. Normal
+     runs (and piped stdin) never pause. *)
+  if s.App.apps = []
+  then (
+    let winget =
+      if s.App.winget <> ""
+      then "winget: " ^ s.App.winget
+      else if s.App.winget_error <> ""
+      then "winget error: " ^ s.App.winget_error
+      else "winget: not found"
+    in
+    print_endline ("  no installed software found\n  " ^ winget);
+    try
+      if Unix.isatty Unix.stdin
+      then (
+        print_string "Press Enter to exit...";
+        flush stdout;
+        ignore (input_line stdin))
+    with
+    | _ -> ())
 ;;

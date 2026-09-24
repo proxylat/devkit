@@ -26,7 +26,8 @@ val real_io : Fetch.fetch -> io
 val find_portable : is_file:(string -> bool) -> string -> string
 
 val find_on_path
-  :  getenv:(string -> string option)
+  :  ?os:string
+  -> getenv:(string -> string option)
   -> is_file:(string -> bool)
   -> string
   -> string

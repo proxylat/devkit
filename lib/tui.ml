@@ -247,6 +247,13 @@ let render_line : line -> string = function
     with per-row colors from {!lines}. *)
 let frame (s : state) : string list = List.map render_line (lines s)
 
+(** Set the footer message and append it to the log. The frontend paints
+    this before a blocking install/update check, so the screen states
+    what is running while the event loop is frozen. *)
+let set_message (s : state) (m : string) : state =
+  { s with message = Some m; log = s.log @ [ m ] }
+;;
+
 (** Record an install outcome: refresh the row status, append the log. *)
 let apply_outcome (s : state) (value : string) (o : Install.outcome) : state =
   let status =

@@ -72,14 +72,40 @@ let test_portable_stops_at_4 () =
 
 let test_on_path () =
   let getenv = function
-    | "PATH" -> Some "/x;/y:/z"
+    | "PATH" -> Some "/x:/y:/z"
     | _ -> None
   in
   let is_file = fun p -> p = Filename.concat "/y" "winget" in
   Alcotest.(check string)
-    "both separators"
+    "colon separated"
     (Filename.concat "/y" "winget")
     (Bootstrap.find_on_path ~getenv ~is_file "winget")
+;;
+
+let test_on_path_win32_exe () =
+  let getenv = function
+    | "PATH" -> Some "C:\\tools;D:\\more"
+    | _ -> None
+  in
+  let want = Filename.concat "C:\\tools" "winget.exe" in
+  let is_file = fun p -> p = want in
+  Alcotest.(check string)
+    "win32 exe suffix"
+    want
+    (Bootstrap.find_on_path ~os:"Win32" ~getenv ~is_file "winget")
+;;
+
+let test_on_path_win32_drive_letter () =
+  let getenv = function
+    | "PATH" -> Some "C:\\tools"
+    | _ -> None
+  in
+  let want = Filename.concat "C:\\tools" "winget.exe" in
+  let is_file = fun p -> p = want in
+  Alcotest.(check string)
+    "drive letter not split"
+    want
+    (Bootstrap.find_on_path ~os:"Win32" ~getenv ~is_file "winget")
 ;;
 
 let test_on_path_miss () =
@@ -447,8 +473,10 @@ let () =
         ; Alcotest.test_case "stops at 4" `Quick test_portable_stops_at_4
         ] )
     ; ( "find_on_path"
-      , [ Alcotest.test_case "both separators" `Quick test_on_path
+      , [ Alcotest.test_case "colon separated" `Quick test_on_path
         ; Alcotest.test_case "miss" `Quick test_on_path_miss
+        ; Alcotest.test_case "win32 exe suffix" `Quick test_on_path_win32_exe
+        ; Alcotest.test_case "win32 drive letter" `Quick test_on_path_win32_drive_letter
         ] )
     ; ( "winget_runs"
       , [ Alcotest.test_case "exit 0" `Quick test_runs_ok
