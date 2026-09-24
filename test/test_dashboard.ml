@@ -88,9 +88,11 @@ let show_fallback_many () =
      the right item (parallel path, order preserved). *)
   let ids = List.init 30 (fun i -> Printf.sprintf "App.%d" i) in
   let manifest = [ { name = "Many"; items = List.map (item Winget) ids } ] in
-  let calls = ref [] in
+  (* [show] runs on parallel domains: count with an atomic, since a
+     shared [ref] prepend can lose updates under concurrent writes. *)
+  let calls = Atomic.make 0 in
   let show id =
-    calls := id :: !calls;
+    Atomic.incr calls;
     Some (id ^ "-ver")
   in
   let sections = Dashboard.build_sections ~show [] manifest None in
@@ -101,7 +103,7 @@ let show_fallback_many () =
        Alcotest.(check string) ("version " ^ id) (id ^ "-ver") it.available_version)
     ids
     got;
-  Alcotest.(check int) "show called per id" 30 (List.length !calls)
+  Alcotest.(check int) "show called per id" 30 (Atomic.get calls)
 ;;
 
 let render_fixture () =
