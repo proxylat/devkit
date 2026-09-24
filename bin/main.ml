@@ -1,8 +1,9 @@
 (** devkit CLI.
 
-    Commands: default (dashboard), import, add, append [--new], export
-    [-o]. The default command opens the interactive TUI on a terminal and
-    prints the plain-text dashboard when piped. *)
+     Commands: default (dashboard), import, add, append [--new], export
+     [-o]. The default command opens the interactive TUI on a terminal
+     (plain-text dashboard when piped, or on Win32 where notty has no
+     backend). *)
 
 open Devkit
 
@@ -65,8 +66,10 @@ let default_term =
     const (fun () ->
       let tools = load_tools () in
       let env = make_env () in
-      (* Piped output stays plain text; a terminal gets the TUI. *)
-      if Unix.isatty Unix.stdout
+      (* Piped output stays plain text; a terminal gets the TUI. Notty
+         has no Windows backend, so Win32 terminals get plain text too
+         (the TUI returns with lambda-term). *)
+      if Unix.isatty Unix.stdout && Sys.os_type <> "Win32"
       then Tui_front.run ~tools env
       else print_string (App.default_view ~tools env))
     $ const ())
