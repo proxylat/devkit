@@ -79,7 +79,7 @@ let test_on_path () =
   Alcotest.(check string)
     "colon separated"
     (Filename.concat "/y" "winget")
-    (Bootstrap.find_on_path ~getenv ~is_file "winget")
+    (Bootstrap.find_on_path ~os:"Unix" ~getenv ~is_file "winget")
 ;;
 
 let test_on_path_win32_exe () =
