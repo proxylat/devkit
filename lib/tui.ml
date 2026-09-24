@@ -82,8 +82,8 @@ let step (s : state) (a : action) : state =
     | Down -> s.cursor + 1
     | Page_up -> s.cursor - s.height
     | Page_down -> s.cursor + s.height
-    | Scroll_up -> s.cursor - 3
-    | Scroll_down -> s.cursor + 3
+    | Scroll_up -> s.cursor - 1
+    | Scroll_down -> s.cursor + 1
     | Home -> 0
     | End -> max_cursor s
     | Quit -> s.cursor
@@ -126,18 +126,12 @@ let color_of : status -> color = function
   | Manual -> Plain
 ;;
 
-let symbol : status -> string = function
-  | Installed -> "ok"
-  | NeedsUpdate -> "update"
-  | NotFound -> "new"
-  | New -> "?"
-  | Manual -> "manual"
-;;
-
+(** Same bracket symbol as the plain renderer, so the TUI and the
+    exit printout show identical rows. *)
 let row_text (e : entry) : string =
   Printf.sprintf
-    "%s  %s  %s"
-    (symbol e.item.status)
+    "[%s] %s%s"
+    (Dashboard.status_symbol e.item.status)
     e.item.value
     (Dashboard.format_ver e.item)
 ;;
@@ -162,17 +156,20 @@ let visible (s : state) : entry list =
   take s.height (drop s.offset s.entries)
 ;;
 
-(** Text frame: header, legend, visible rows (cursor marked), message,
-    footer. The notty frontend draws one line per string. *)
-let frame (s : state) : string list =
-  let header = "devkit — enter installs/updates, q quits" in
-  let legend = "ok installed · update pending · new missing · manual link" in
-  let rows =
-    List.mapi
-      (fun i e ->
-         let mark = if s.offset + i = s.cursor then "> " else "  " in
-         mark ^ row_text e)
-      (visible s)
+(** Structured frame lines: headers and dividers are plain text,
+    rows carry their entry plus a cursor flag for the frontend. *)
+type line =
+  | Head of string
+  | Divider of string
+  | Row of entry * bool
+
+let lines (s : state) : line list =
+  let vis = List.mapi (fun i e -> s.offset + i, e) (visible s) in
+  let rec rows prev_section = function
+    | [] -> []
+    | (idx, e) :: rest ->
+      let head = if Some e.section <> prev_section then [ Divider e.section ] else [] in
+      head @ [ Row (e, idx = s.cursor) ] @ rows (Some e.section) rest
   in
   let footer =
     match s.message with
@@ -183,8 +180,22 @@ let frame (s : state) : string list =
         (min (s.cursor + 1) (List.length s.entries))
         (List.length s.entries)
   in
-  (header :: legend :: rows) @ [ footer ]
+  [ Head "devkit — enter installs/updates, q quits"
+  ; Head "[✓] installed · [!] update · [+] missing · [~] manual"
+  ]
+  @ rows None vis
+  @ [ Head footer ]
 ;;
+
+let render_line : line -> string = function
+  | Head s -> s
+  | Divider name -> String.uppercase_ascii name
+  | Row (e, cursor) -> (if cursor then "> " else "  ") ^ row_text e
+;;
+
+(** Text frame: one string per line. The notty frontend draws these
+    with per-row colors from {!lines}. *)
+let frame (s : state) : string list = List.map render_line (lines s)
 
 (** Record an install outcome: refresh the row status, append the log. *)
 let apply_outcome (s : state) (value : string) (o : Install.outcome) : state =

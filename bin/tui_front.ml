@@ -24,23 +24,15 @@ let color_attr : Tui.color -> attr = function
 ;;
 
 let draw (st : Tui.state) : image =
-  let rows = Tui.visible st in
-  let img_of_line i line =
-    if i = 0
-    then I.string A.(st bold) line
-    else if i = 1
-    then I.string A.empty line
-    else (
-      match List.nth_opt rows (i - 2) with
-      | None -> I.string A.empty line
-      | Some e ->
-        let attr = color_attr (Tui.color_of e.Tui.item.Manifest.status) in
-        let attr =
-          if st.Tui.offset + i - 2 = st.Tui.cursor then A.(attr ++ st reverse) else attr
-        in
-        I.string attr line)
+  let img_of_line i = function
+    | Tui.Head s -> if i = 0 then I.string A.(st bold) s else I.string A.empty s
+    | Tui.Divider _ as d -> I.string A.(st bold ++ fg lightblack) (" " ^ Tui.render_line d)
+    | Tui.Row (e, cursor) ->
+      let attr = color_attr (Tui.color_of e.Tui.item.Manifest.status) in
+      let attr = if cursor then A.(attr ++ st reverse) else attr in
+      I.string attr (Tui.render_line (Tui.Row (e, cursor)))
   in
-  I.vcat (List.mapi img_of_line (Tui.frame st))
+  I.vcat (List.mapi img_of_line (Tui.lines st))
 ;;
 
 type ev =
