@@ -1,8 +1,8 @@
 (** devkit CLI.
 
     Commands: default (dashboard), import, add, append [--new], export
-    [-o]. The default view prints the plain-text dashboard; the
-    interactive TUI arrives in Phase 5. *)
+    [-o]. The default command opens the interactive TUI on a terminal and
+    prints the plain-text dashboard when piped. *)
 
 open Devkit
 
@@ -64,7 +64,11 @@ let default_term =
   Cmdliner.Term.(
     const (fun () ->
       let tools = load_tools () in
-      print_string (App.default_view ~tools (make_env ())))
+      let env = make_env () in
+      (* Piped output stays plain text; a terminal gets the TUI. *)
+      if Unix.isatty Unix.stdout
+      then Tui_front.run ~tools env
+      else print_string (App.default_view ~tools env))
     $ const ())
 ;;
 
@@ -72,7 +76,7 @@ let default_info =
   Cmdliner.Cmd.info
     "devkit"
     ~doc:
-      "Scan your PC for installed software and manage packages. With pkgs.txt: shows \
+      "Scan your PC for installed software and manage packages. With devkit.toml: shows \
        status. Without: shows everything installed."
 ;;
 
@@ -94,15 +98,14 @@ let add_cmd =
   let ids = Cmdliner.Arg.(non_empty & pos_all string [] & info [] ~docv:"ID") in
   let run ids = print_lines (App.run_add ~tools:(load_tools ()) (make_env ()) ids) in
   Cmdliner.Cmd.v
-    (Cmdliner.Cmd.info "add" ~doc:"Append specific installed apps to pkgs.txt")
+    (Cmdliner.Cmd.info "add" ~doc:"Append specific installed apps to devkit.toml")
     Cmdliner.Term.(const run $ ids)
 ;;
 
 let append_cmd =
   let ids = Cmdliner.Arg.(value & pos_all string [] & info [] ~docv:"ID") in
   let is_new =
-    Cmdliner.Arg.(
-      value & flag & info [ "new" ] ~doc:"append all newly-detected apps (no TUI yet)")
+    Cmdliner.Arg.(value & flag & info [ "new" ] ~doc:"append all newly-detected apps")
   in
   let run ids is_new =
     let tools = load_tools () in
@@ -114,7 +117,7 @@ let append_cmd =
   Cmdliner.Cmd.v
     (Cmdliner.Cmd.info
        "append"
-       ~doc:"Append newly-detected apps (or given ids) to pkgs.txt")
+       ~doc:"Append newly-detected apps (or given ids) to devkit.toml")
     Cmdliner.Term.(const run $ ids $ is_new)
 ;;
 
@@ -122,7 +125,7 @@ let export_cmd =
   let output =
     Cmdliner.Arg.(
       value
-      & opt string "pkgs.txt"
+      & opt string Manifest.filename
       & info [ "o"; "output" ] ~docv:"FILE" ~doc:"output file path")
   in
   let run output =
@@ -131,7 +134,7 @@ let export_cmd =
   Cmdliner.Cmd.v
     (Cmdliner.Cmd.info
        "export"
-       ~doc:"Scan PC and write all installed software to pkgs.txt")
+       ~doc:"Scan PC and write all installed software to devkit.toml")
     Cmdliner.Term.(const run $ output)
 ;;
 

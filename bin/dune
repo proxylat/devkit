@@ -1,4 +1,5 @@
 (executable
  (public_name devkit)
  (name main)
- (libraries devkit cmdliner unix))
+ (modules main tui_front)
+ (libraries devkit cmdliner unix notty.unix))

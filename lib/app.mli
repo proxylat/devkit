@@ -21,14 +21,14 @@ type scan =
   }
 
 (** Missing/unparseable file yields empty sections. *)
-val load_manifest : fs -> string -> Pkgfile.section list * string
+val load_manifest : fs -> string -> Manifest.section list * string
 
 val winget_show : Bootstrap.io -> string -> string -> string
 val scan : env -> override_path:string -> extra:Plugin.tool list -> scan
 val default_view : env -> tools:Plugin.tool list -> string
 val import_view : env -> ?tools:Plugin.tool list -> string -> (string, string) result
-val append_selected : fs -> string -> Pkgfile.item list -> (unit, string) result
-val new_items : ?extra:bool -> Pkgfile.section list -> Pkgfile.item list
+val append_selected : fs -> string -> Manifest.item list -> (unit, string) result
+val new_items : ?extra:bool -> Manifest.section list -> Manifest.item list
 val run_add : env -> ?tools:Plugin.tool list -> string list -> string list
 val run_append : env -> ?tools:Plugin.tool list -> string list -> string list
 val run_append_new : env -> tools:Plugin.tool list -> string list
