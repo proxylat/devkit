@@ -201,6 +201,31 @@ let export_no_winget () =
   Alcotest.(check bool) "no json file" false (Hashtbl.mem files "out.json")
 ;;
 
+let export_only () =
+  let files = Hashtbl.create 1 in
+  let e =
+    { (env files) with
+      run = (fun prog _ -> if prog = "npm" then Some "x@1.0.0\n" else None)
+    }
+  in
+  let msgs = App.run_export e ~only:[ "npm" ] "out.toml" in
+  Alcotest.(check (list string))
+    "messages"
+    [ "wrote out.toml (1 apps)"; "  no winget apps, json skipped" ]
+    msgs;
+  let r = Devkit.Manifest.parse (Hashtbl.find files "out.toml") in
+  let secs = List.map (fun (sec : Devkit.Manifest.section) -> sec.name) r.sections in
+  Alcotest.(check (list string)) "only npm section" [ "npm" ] secs;
+  Alcotest.(check bool) "no json file" false (Hashtbl.mem files "out.json")
+;;
+
+let export_except () =
+  let files = Hashtbl.create 1 in
+  let msgs = App.run_export (env files) ~except:[ "winget" ] "out.toml" in
+  Alcotest.(check (list string)) "filtered out" [ "  no installed software found" ] msgs;
+  Alcotest.(check bool) "no toml file" false (Hashtbl.mem files "out.toml")
+;;
+
 let new_items () =
   let mk status =
     { Manifest.typ = Manifest.Winget
@@ -259,6 +284,8 @@ let () =
         ; Alcotest.test_case "export" `Quick export
         ; Alcotest.test_case "export_empty" `Quick export_empty
         ; Alcotest.test_case "export_no_winget" `Quick export_no_winget
+        ; Alcotest.test_case "export_only" `Quick export_only
+        ; Alcotest.test_case "export_except" `Quick export_except
         ; Alcotest.test_case "show" `Quick show
         ; Alcotest.test_case "default" `Quick default
         ] )
