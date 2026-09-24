@@ -304,7 +304,10 @@ let test_browser_linux () =
       seen := prog, args;
       "", true)
   in
-  Alcotest.(check bool) "ok" true (Install.real_open_browser spawn "https://x" = Ok ());
+  Alcotest.(check bool)
+    "ok"
+    true
+    (Install.real_open_browser ~os:"Unix" spawn "https://x" = Ok ());
   Alcotest.(check string) "xdg-open" "xdg-open" (fst !seen)
 ;;
 
@@ -318,7 +321,7 @@ let test_browser_darwin () =
       ignore args;
       "", true)
   in
-  ignore (Install.real_open_browser spawn "https://x");
+  ignore (Install.real_open_browser ~os:"Unix" spawn "https://x");
   Alcotest.(check string) "open" "open" !seen
 ;;
 

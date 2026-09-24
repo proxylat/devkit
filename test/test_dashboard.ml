@@ -192,7 +192,7 @@ let path_probe_rescue () =
     | "sh", [ "-c"; _ ] -> Some "gizmo\n"
     | _ -> None
   in
-  let sections = Dashboard.build_sections ~run:(Some run) [] manifest None in
+  let sections = Dashboard.build_sections ~os:"Unix" ~run:(Some run) [] manifest None in
   Alcotest.(check int) "single spawn" 1 !calls;
   let it = List.nth (List.nth sections 0).items 0 in
   Alcotest.(check string) "no version" "" it.installed_version;
@@ -209,7 +209,7 @@ let path_probe_miss () =
     incr calls;
     Some ""
   in
-  let sections = Dashboard.build_sections ~run:(Some run) [] manifest None in
+  let sections = Dashboard.build_sections ~os:"Unix" ~run:(Some run) [] manifest None in
   Alcotest.(check int) "single spawn" 1 !calls;
   let it = List.nth (List.nth sections 0).items 0 in
   match it.status with

@@ -29,6 +29,6 @@ type deps =
     switches, anything else refused. *)
 val run_installer : Bootstrap.spawn -> string -> (unit, string) result
 
-val real_open_browser : Bootstrap.spawn -> string -> (unit, string) result
+val real_open_browser : ?os:string -> Bootstrap.spawn -> string -> (unit, string) result
 val install : deps -> string -> string -> bool -> outcome
 val real_deps : Fetch.fetch -> winget_override:string -> unit -> deps

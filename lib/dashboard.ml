@@ -92,6 +92,7 @@ let candidates (it : item) : string list =
 let build_sections
       ?(show : string -> string option = fun _ -> None)
       ?(run : Proc.runner option = None)
+      ?(os : string = Sys.os_type)
       (apps : app list)
       (pkgs_sections : section list)
       (winget_info : Winget_parse.info Winget_parse.IdMap.t option)
@@ -109,7 +110,7 @@ let build_sections
      let cands =
        List.concat_map (fun sec -> List.concat_map candidates sec.items) pkgs_sections
      in
-     List.iter (fun n -> Hashtbl.replace on_path n ()) (Proc.which run cands));
+     List.iter (fun n -> Hashtbl.replace on_path n ()) (Proc.which ~os run cands));
   let scan_hit (it : item) : app option =
     List.find_map (fun c -> Hashtbl.find_opt scan_lookup c) (candidates it)
   in
