@@ -4,8 +4,9 @@
     on Enter. On exit the plain-text dashboard plus the install log go
     to stdout, so redirected output stays usable. Lambda-term (unlike
     notty) has a real Windows backend, so this frontend serves both
-    OSes. Installs run synchronously and freeze the UI while they run;
-    mouse/wheel input is ignored (keyboard scroll covers it). *)
+    OSes. Installs run synchronously and freeze the UI while they run.
+    Mouse reporting is on for wheel-scroll only; other mouse events are
+    ignored. *)
 
 open Devkit
 open Lwt.Infix
@@ -68,6 +69,10 @@ let classify : LTerm_event.t -> ev = function
     (match is_nav c with
      | Some a -> Action a
      | None -> Nothing)
+  | LTerm_event.Mouse m when m.LTerm_mouse.button = LTerm_mouse.Button4 ->
+    Action Tui.Scroll_up
+  | LTerm_event.Mouse m when m.LTerm_mouse.button = LTerm_mouse.Button5 ->
+    Action Tui.Scroll_down
   | LTerm_event.Key _ | LTerm_event.Sequence _ | LTerm_event.Mouse _ -> Nothing
 ;;
 
@@ -97,14 +102,19 @@ let press_enter (deps : Install.deps) (st : Tui.state) : Tui.state =
 
 let viewport (w : int) (h : int) : int * int = max 1 w, max 1 (h - 3)
 
+(** Repaint in place, one addressed line at a time: no full-screen
+    clear, so scrolling does not flash. Line count only changes on
+    resize, which repaints from a cleared screen. *)
 let draw_all (term : LTerm.t) (st : Tui.state) : unit Lwt.t =
-  LTerm.clear_screen term
-  >>= fun () ->
-  LTerm.goto term { row = 0; col = 0 }
-  >>= fun () ->
-  Lwt_list.iter_s
-    (fun text -> LTerm.fprintls term text)
+  Lwt_list.iteri_s
+    (fun i text ->
+       LTerm.goto term { row = i; col = 0 }
+       >>= fun () -> LTerm.clear_line term >>= fun () -> LTerm.fprints term text)
     (List.mapi styled_of_line (Tui.lines st))
+  >>= fun () ->
+  (* LTerm buffers through Lwt_io: without this, repaints (and the
+     first frame) never reach the screen. *)
+  LTerm.flush term
 ;;
 
 let run ~(tools : Plugin.tool list) (env : App.env) : unit =
@@ -130,24 +140,31 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
           restores the shell view (like the old notty frontend). *)
        LTerm.save_state term
        >>= fun () ->
+       LTerm.enable_mouse term
+       >>= fun () ->
        let geom = LTerm.size term in
        let vw, vh = viewport geom.LTerm_geom.cols geom.LTerm_geom.rows in
-       let rec loop (st : Tui.state) : Tui.state Lwt.t =
-         draw_all term st
-         >>= fun () ->
+       (* Draw, then wait: events that change nothing skip the repaint. *)
+       let rec draw_loop (st : Tui.state) : Tui.state Lwt.t =
+         draw_all term st >>= fun () -> wait_loop st
+       and wait_loop (st : Tui.state) : Tui.state Lwt.t =
          LTerm.read_event term
          >>= fun ev ->
          match classify ev with
          | Quit -> Lwt.return st
-         | Enter -> loop (press_enter deps st)
-         | Action a -> loop (Tui.step st a)
+         | Nothing -> wait_loop st
+         | Enter -> draw_loop (press_enter deps st)
+         | Action a -> draw_loop (Tui.step st a)
          | Resized g ->
+           LTerm.clear_screen term
+           >>= fun () ->
            let vw, vh = viewport g.LTerm_geom.cols g.LTerm_geom.rows in
-           loop (Tui.resize st ~height:vh ~width:vw)
-         | Nothing -> loop st
+           draw_loop (Tui.resize st ~height:vh ~width:vw)
        in
-       loop (Tui.make dash ~height:vh ~width:vw)
+       draw_loop (Tui.make dash ~height:vh ~width:vw)
        >>= fun st ->
+       LTerm.disable_mouse term
+       >>= fun () ->
        LTerm.load_state term
        >>= fun () ->
        LTerm.leave_raw_mode term mode
