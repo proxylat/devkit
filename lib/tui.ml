@@ -164,13 +164,63 @@ type line =
   | Row of entry * bool
 
 let lines (s : state) : line list =
-  let vis = List.mapi (fun i e -> s.offset + i, e) (visible s) in
-  let rec rows prev_section = function
-    | [] -> []
-    | (idx, e) :: rest ->
-      let head = if Some e.section <> prev_section then [ Divider e.section ] else [] in
-      head @ [ Row (e, idx = s.cursor) ] @ rows (Some e.section) rest
+  let at i = if i < 0 then None else List.nth_opt s.entries i in
+  let prev0 =
+    match at (s.offset - 1) with
+    | None -> None
+    | Some e -> Some e.section
   in
+  (* Entry units from the offset, each tagged with its index. *)
+  let rec units i prev =
+    match at i with
+    | None -> []
+    | Some e ->
+      let div = if Some e.section <> prev then Some (Divider e.section) else None in
+      (i, div, e) :: units (i + 1) (Some e.section)
+  in
+  (* Flatten to tagged lines: divider (if any) then the row. *)
+  let all =
+    List.concat_map
+      (fun (i, div, e) ->
+         (match div with
+          | Some d -> [ i, d ]
+          | None -> [])
+         @ [ i, Row (e, i = s.cursor) ])
+      (units s.offset prev0)
+  in
+  let rec take k = function
+    | [] -> []
+    | (i, l) :: t -> if k <= 0 then [] else (i, l) :: take (k - 1) t
+  in
+  let win = take s.height all in
+  let win =
+    if List.exists (fun (i, _) -> i = s.cursor) win
+    then win
+    else (
+      (* Dividers pushed the cursor row past the budget: end the window
+         at the cursor and fill upward so the screen stays full. *)
+      let rec upto acc = function
+        | [] -> List.rev acc
+        | (i, l) :: t -> if i > s.cursor then List.rev acc else upto ((i, l) :: acc) t
+      in
+      let before = upto [] all in
+      List.rev (take s.height (List.rev before)))
+  in
+  (* Restore the section context when the drop cut the divider. *)
+  let win =
+    match win with
+    | (i, Row (e, _)) :: _ when i > 0 ->
+      let prev_sec =
+        match at (i - 1) with
+        | None -> None
+        | Some p -> Some p.section
+      in
+      if prev_sec <> Some e.section && List.length win < s.height
+      then (i, Divider e.section) :: win
+      else win
+    | _ -> win
+  in
+  let body = List.map snd win in
   let footer =
     match s.message with
     | Some m -> m
@@ -183,7 +233,7 @@ let lines (s : state) : line list =
   [ Head "devkit — enter installs/updates, q quits"
   ; Head "[✓] installed · [!] update · [+] missing · [~] manual"
   ]
-  @ rows None vis
+  @ body
   @ [ Head footer ]
 ;;
 

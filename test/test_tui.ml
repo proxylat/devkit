@@ -121,6 +121,29 @@ let frame_shape () =
      String.length row >= 8 && String.sub row 2 6 = "[✓] ")
 ;;
 
+let frame_fits_height () =
+  (* 5 single-item sections, viewport 3 lines: body must fit and the
+     cursor row must stay visible at both ends. *)
+  let secs =
+    List.init 5 (fun i ->
+      { Manifest.name = Printf.sprintf "s%d" i
+      ; items = [ item Manifest.Installed (Printf.sprintf "v%d" i) ]
+      })
+  in
+  let body_lines f = List.filter (fun l -> l <> "") f in
+  let s = Devkit.Tui.make secs ~height:3 ~width:80 in
+  let f = Devkit.Tui.frame s in
+  Alcotest.(check int) "2 head + 3 body + foot" 6 (List.length f);
+  Alcotest.(check int) "no blanks counted" 6 (List.length (body_lines f));
+  let s = Devkit.Tui.step s Devkit.Tui.End in
+  let f = Devkit.Tui.frame s in
+  Alcotest.(check int) "still fits at end" 6 (List.length f);
+  Alcotest.(check bool)
+    "cursor row visible"
+    true
+    (List.exists (fun l -> String.length l >= 2 && String.sub l 0 2 = "> ") f)
+;;
+
 let colors () =
   let open Devkit.Tui in
   let open Devkit.Manifest in
@@ -158,6 +181,7 @@ let () =
         ] )
     ; ( "frame"
       , [ Alcotest.test_case "shape" `Quick frame_shape
+        ; Alcotest.test_case "fits height" `Quick frame_fits_height
         ; Alcotest.test_case "colors" `Quick colors
         ] )
     ]
