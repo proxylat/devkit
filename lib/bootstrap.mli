@@ -42,10 +42,12 @@ val format_size : int64 -> string
 val make_path_cache : unit -> (io -> string) * (unit -> unit)
 
 (** Locate winget, downloading it when nothing resolves. A non-empty
-    [~override_path] is returned blindly. *)
+    [~override_path] is returned blindly. The download only runs when
+    [~os] is ["Win32"] (default: [Sys.os_type]). *)
 val ensure_full
   :  override_path:string
   -> resolve_path:(io -> string)
+  -> ?os:string
   -> io
   -> (string, string) result
 

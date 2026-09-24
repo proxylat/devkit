@@ -83,6 +83,27 @@ let show_fallback () =
   | _ -> Alcotest.fail "stays NotFound"
 ;;
 
+let show_fallback_many () =
+  (* 30 missing ids: every one gets a show call and its version lands on
+     the right item (parallel path, order preserved). *)
+  let ids = List.init 30 (fun i -> Printf.sprintf "App.%d" i) in
+  let manifest = [ { name = "Many"; items = List.map (item Winget) ids } ] in
+  let calls = ref [] in
+  let show id =
+    calls := id :: !calls;
+    Some (id ^ "-ver")
+  in
+  let sections = Dashboard.build_sections ~show [] manifest None in
+  let got = (List.nth sections 0).items in
+  Alcotest.(check int) "all enriched" 30 (List.length got);
+  List.iter2
+    (fun id it ->
+       Alcotest.(check string) ("version " ^ id) (id ^ "-ver") it.available_version)
+    ids
+    got;
+  Alcotest.(check int) "show called per id" 30 (List.length !calls)
+;;
+
 let render_fixture () =
   let sections =
     [ { name = "Pending updates"
@@ -140,6 +161,7 @@ let () =
       , [ Alcotest.test_case "basic" `Quick merge_basic
         ; Alcotest.test_case "winget artifact dropped" `Quick winget_artifact_dropped
         ; Alcotest.test_case "show fallback" `Quick show_fallback
+        ; Alcotest.test_case "show fallback many" `Quick show_fallback_many
         ] )
     ; ( "render"
       , [ Alcotest.test_case "exact fixture" `Quick render_fixture

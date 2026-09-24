@@ -263,13 +263,27 @@ let test_ensure_resolved () =
 let test_ensure_download_cert_advice () =
   let get, _ = fresh_cache () in
   let io = base_io ~latest:(Error "x509: certificate signed by unknown authority") () in
-  match Bootstrap.ensure_full ~override_path:"" ~resolve_path:get io with
+  match Bootstrap.ensure_full ~override_path:"" ~resolve_path:get ~os:"Win32" io with
   | Ok _ -> Alcotest.fail "expected download error"
   | Error e ->
     Alcotest.(check bool)
       "cert advice appended"
       true
       (Strutil.contains_substring "Trusted Root" e)
+;;
+
+let test_ensure_no_download_off_windows () =
+  let get, _ = fresh_cache () in
+  let io =
+    base_io
+      ~latest:(Error "must not be called")
+      ~download:(fun ~url:_ -> Error "must not be called")
+      ()
+  in
+  match Bootstrap.ensure_full ~override_path:"" ~resolve_path:get ~os:"Unix" io with
+  | Ok _ -> Alcotest.fail "expected error"
+  | Error e ->
+    Alcotest.(check string) "fast failure" "winget is only available on Windows" e
 ;;
 
 (* --- download_winget against fixtures --- *)
@@ -453,6 +467,10 @@ let () =
       , [ Alcotest.test_case "override blind" `Quick test_ensure_override_blind
         ; Alcotest.test_case "resolved" `Quick test_ensure_resolved
         ; Alcotest.test_case "cert advice" `Quick test_ensure_download_cert_advice
+        ; Alcotest.test_case
+            "no download off Windows"
+            `Quick
+            test_ensure_no_download_off_windows
         ] )
     ; ( "download"
       , [ Alcotest.test_case "happy path" `Quick test_download_happy
