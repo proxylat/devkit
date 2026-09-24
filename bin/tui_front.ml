@@ -36,12 +36,17 @@ let styled_of_line (i : int) : Tui.line -> LTerm_text.t = function
 type ev =
   | Quit
   | Enter
+  | Update
   | Action of Tui.action
   | Resized of LTerm_geom.size
   | Nothing
 
 let is_ctrl_q : Uchar.t -> bool =
   fun c -> Uchar.equal c (Uchar.of_char 'q') || Uchar.equal c (Uchar.of_char 'Q')
+;;
+
+let is_update_key : Uchar.t -> bool =
+  fun c -> Uchar.equal c (Uchar.of_char 'u') || Uchar.equal c (Uchar.of_char 'U')
 ;;
 
 let is_nav : Uchar.t -> Tui.action option =
@@ -59,6 +64,7 @@ let classify : LTerm_event.t -> ev = function
   | LTerm_event.Key { code = LTerm_key.Escape; _ } -> Quit
   | LTerm_event.Key { code = LTerm_key.Char c; _ } when is_ctrl_q c -> Quit
   | LTerm_event.Key { code = LTerm_key.Enter; _ } -> Enter
+  | LTerm_event.Key { code = LTerm_key.Char c; _ } when is_update_key c -> Update
   | LTerm_event.Key { code = LTerm_key.Up; _ } -> Action Tui.Up
   | LTerm_event.Key { code = LTerm_key.Down; _ } -> Action Tui.Down
   | LTerm_event.Key { code = LTerm_key.Prev_page; _ } -> Action Tui.Page_up
@@ -101,6 +107,13 @@ let press_enter (deps : Install.deps) (st : Tui.state) : Tui.state =
 ;;
 
 let viewport (w : int) (h : int) : int * int = max 1 w, max 1 (h - 3)
+
+(** [u]: check npm/pipx/uv/cargo updates for the Installed rows, then
+    mark the hits. Runs synchronously like installs (UI freezes). *)
+let press_u (run : Proc.runner) (fetch : Fetch.fetch) (st : Tui.state) : Tui.state =
+  let items = List.map (fun e -> e.Tui.item) st.Tui.entries in
+  Tui.apply_updates st (Update.check_all ~run ~fetch items)
+;;
 
 (** Repaint in place, one addressed line at a time: no full-screen
     clear, so scrolling does not flash. Line count only changes on
@@ -156,6 +169,7 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
          | Quit -> Lwt.return st
          | Nothing -> wait_loop st
          | Enter -> draw_loop (press_enter deps st)
+         | Update -> draw_loop (press_u env.App.run fetch st)
          | Action a -> draw_loop (Tui.step st a)
          | Resized g ->
            LTerm.clear_screen term

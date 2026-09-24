@@ -230,7 +230,7 @@ let lines (s : state) : line list =
         (min (s.cursor + 1) (List.length s.entries))
         (List.length s.entries)
   in
-  [ Head "devkit — enter installs/updates, q quits"
+  [ Head "devkit — enter installs/updates, u checks updates, q quits"
   ; Head "[✓] installed · [!] update · [+] missing · [~] manual"
   ]
   @ body
@@ -266,4 +266,28 @@ let apply_outcome (s : state) (value : string) (o : Install.outcome) : state =
   in
   let line = Printf.sprintf "%s: %s" value (Install.status_to_string o.Install.status) in
   clamp { s with entries; message = Some line; log = s.log @ [ line ] }
+;;
+
+(** Mark rows with available updates: set available_version +
+    [NeedsUpdate] by value, with a summary message + log. An empty
+    result keeps every row and reports everything current. *)
+let apply_updates (s : state) (updates : (string * string) list) : state =
+  let entries =
+    List.map
+      (fun e ->
+         match List.assoc_opt e.item.value updates with
+         | Some avail ->
+           { e with
+             item = { e.item with status = NeedsUpdate; available_version = avail }
+           }
+         | None -> e)
+      s.entries
+  in
+  let message =
+    match updates with
+    | [] -> "everything up to date"
+    | [ (v, _) ] -> Printf.sprintf "1 update available: %s" v
+    | _ -> Printf.sprintf "%d updates available" (List.length updates)
+  in
+  clamp { s with entries; message = Some message; log = s.log @ [ message ] }
 ;;
