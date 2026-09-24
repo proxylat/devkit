@@ -36,6 +36,13 @@ jobs:
       - name: Test
         run: opam exec -- dune runtest --force
 
+      - name: Upload windows exe
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: devkit-windows
+          path: _build/default/bin/main.exe
+
   fmt:
     runs-on: ubuntu-latest
     steps:
