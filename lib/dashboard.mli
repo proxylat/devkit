@@ -6,6 +6,7 @@ type app =
   ; pm : string
   }
 
+val status_symbol : Manifest.status -> string
 val format_ver : Manifest.item -> string
 
 (** Merge the machine scan with manifest sections into dashboard sections:

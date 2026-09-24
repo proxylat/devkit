@@ -57,5 +57,13 @@ type enter =
 val enter_action : state -> enter
 val row_text : entry -> string
 val visible : state -> entry list
+
+type line =
+  | Head of string
+  | Divider of string
+  | Row of entry * bool
+
+val lines : state -> line list
+val render_line : line -> string
 val frame : state -> string list
 val apply_outcome : state -> string -> Install.outcome -> state

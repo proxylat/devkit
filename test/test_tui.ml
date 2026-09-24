@@ -106,12 +106,19 @@ let apply_failure_keeps () =
 let frame_shape () =
   let s = Tui.make (sections ()) ~height:10 ~width:80 in
   let f = Tui.frame s in
-  Alcotest.(check int) "header+legend+3rows+footer" 6 (List.length f);
+  (* header + legend + TOOLS divider + a + b + MORE divider + url + footer *)
+  Alcotest.(check int) "lines" 8 (List.length f);
+  Alcotest.(check string) "divider uppercased" "TOOLS" (List.nth f 2);
   Alcotest.(check bool)
     "cursor marked"
     true
-    (let row = List.nth f 2 in
-     String.length row >= 2 && String.sub row 0 2 = "> ")
+    (let row = List.nth f 3 in
+     String.length row >= 2 && String.sub row 0 2 = "> ");
+  Alcotest.(check bool)
+    "bracket symbol"
+    true
+    (let row = List.nth f 3 in
+     String.length row >= 8 && String.sub row 2 6 = "[✓] ")
 ;;
 
 let colors () =
@@ -127,7 +134,7 @@ let colors () =
 let scroll () =
   let s = Devkit.Tui.make (sections ()) ~height:2 ~width:80 in
   let s = Devkit.Tui.step s Devkit.Tui.Scroll_down in
-  Alcotest.(check int) "scroll moves 3" 2 s.Devkit.Tui.cursor;
+  Alcotest.(check int) "scroll moves 1" 1 s.Devkit.Tui.cursor;
   let s = Devkit.Tui.step s Devkit.Tui.Scroll_up in
   Alcotest.(check int) "scroll back clamps" 0 s.Devkit.Tui.cursor
 ;;
