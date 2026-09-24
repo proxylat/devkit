@@ -4,7 +4,7 @@
     here it is an injectable [?show] function ([None] by default) so the
     merge stays pure and testable. *)
 
-open Pkgfile
+open Manifest
 
 type app =
   { name : string
@@ -82,7 +82,7 @@ let build_sections
                            }
                          else { it with status = Installed }
                        | None -> { it with status = NotFound })
-                    | GitHub | Url -> { it with status = Manual }
+                    | GitHub | Url | Pm _ -> { it with status = Manual }
                   in
                   let it =
                     if it.status <> Installed && it.status <> NeedsUpdate

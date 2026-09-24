@@ -1,5 +1,5 @@
 (test
- (name test_pkgfile)
+ (name test_manifest)
  (libraries devkit alcotest))
 
 (test
@@ -47,3 +47,7 @@
 (test
  (name test_plugin)
  (libraries devkit alcotest re sexplib))
+
+(test
+ (name test_tui)
+ (libraries devkit alcotest))

@@ -10,13 +10,12 @@
     - No silent manifest rewrite: it would destroy user edits, so it
       stays out.
     - No dead append helper: only wired commands ship.
-    - [--new] appends every newly-detected app; TUI selection lands in
-      Phase 5.
+    - [--new] appends every newly-detected app.
     - [winget show] enrichment runs sequentially; parallelize when it
       measurably hurts.
     - pm order: [winget; npm; pipx; uv; cargo]. *)
 
-open Pkgfile
+open Manifest
 open Dashboard
 
 let pm_order = [ "winget"; "npm"; "pipx"; "uv"; "cargo" ]
@@ -35,13 +34,12 @@ type env =
 
 let lower s = String.lowercase_ascii s
 
-(** [parsePkgFile]: missing/unparseable file yields empty sections, as Go
-    ignores both errors. *)
+(** Missing/unparseable file yields empty sections. *)
 let load_manifest (fs : fs) (path : string) : section list * string =
   match fs.read_file path with
   | None -> [], ""
   | Some text ->
-    let r = Pkgfile.parse text in
+    let r = Manifest.parse text in
     r.sections, r.winget_path
 ;;
 
@@ -132,10 +130,10 @@ let to_dashboard_apps (apps : app list) : Dashboard.app list =
     apps
 ;;
 
-(** Default view: scan, enrich, merge with pkgs.txt, render plain text.
-    Returns the rendered dashboard (the TUI takes over in Phase 5). *)
+(** Default view: scan, enrich, merge with the manifest, render plain
+    text. Returns the rendered dashboard (the TUI takes over on a tty). *)
 let default_view (e : env) ~(tools : Plugin.tool list) : string =
-  let sections, winget_path = load_manifest e.fs "pkgs.txt" in
+  let sections, winget_path = load_manifest e.fs Manifest.filename in
   let s = scan e ~override_path:winget_path ~extra:tools in
   let show id =
     let v = winget_show e.bio s.winget id in
@@ -151,7 +149,7 @@ let import_view (e : env) ?(tools : Plugin.tool list = []) (path : string)
   match e.fs.read_file path with
   | None -> Error ("open: " ^ path)
   | Some text ->
-    let r = Pkgfile.parse text in
+    let r = Manifest.parse text in
     let s = scan e ~override_path:r.winget_path ~extra:tools in
     let show id =
       let v = winget_show e.bio s.winget id in
@@ -160,29 +158,25 @@ let import_view (e : env) ?(tools : Plugin.tool list = []) (path : string)
     Ok (render (build_sections ~show (to_dashboard_apps s.apps) r.sections s.info))
 ;;
 
-let type_string = function
-  | Winget -> "winget"
-  | GitHub -> "github"
-  | Url -> "url"
-;;
-
-(** [appendSelected]: persists items under a "# Newly detected" section,
+(** [appendSelected]: persists items under a "Newly detected" section,
     grouped in pm order. Existing entries are never touched. *)
 let append_selected (fs : fs) (path : string) (items : item list) : (unit, string) result =
   if items = []
   then Ok ()
   else (
-    let buf = Buffer.create 256 in
-    Buffer.add_string buf "\n# Newly detected\n";
-    List.iter
-      (fun pm ->
-         List.iter
-           (fun it ->
-              if type_string it.typ = pm
-              then Buffer.add_string buf (Printf.sprintf "%s:%s\n" pm it.value))
-           items)
-      pm_order;
-    fs.append_file path (Buffer.contents buf))
+    let ordered =
+      List.concat_map
+        (fun pm -> List.filter (fun it -> Manifest.type_string it.typ = pm) items)
+        pm_order
+    in
+    let text =
+      "\n"
+      ^ Manifest.to_string
+          { sections = [ { name = "Newly detected"; items = ordered } ]
+          ; winget_path = ""
+          }
+    in
+    fs.append_file path text)
 ;;
 
 let is_new_section (sec : section) : bool =
@@ -213,7 +207,7 @@ let run_add (e : env) ?(tools : Plugin.tool list = []) (ids : string list) : str
        if a.pm = "winget" && a.name <> ""
        then Hashtbl.replace installed (lower a.name) true)
     s.apps;
-  let sections, _ = load_manifest e.fs "pkgs.txt" in
+  let sections, _ = load_manifest e.fs Manifest.filename in
   let known = Hashtbl.create 64 in
   List.iter
     (fun (sec : section) ->
@@ -249,10 +243,14 @@ let run_add (e : env) ?(tools : Plugin.tool list = []) (ids : string list) : str
   (match List.rev !to_append with
    | [] -> emit "  nothing to append"
    | items ->
-     (match append_selected e.fs "pkgs.txt" items with
+     (match append_selected e.fs Manifest.filename items with
       | Error e -> emit ("  error: " ^ e)
       | Ok () ->
-        emit (Printf.sprintf "  appended %d app(s) to pkgs.txt" (List.length items))));
+        emit
+          (Printf.sprintf
+             "  appended %d app(s) to %s"
+             (List.length items)
+             Manifest.filename)));
   List.rev !msgs
 ;;
 
@@ -265,38 +263,45 @@ let run_append (e : env) ?(tools : Plugin.tool list = []) (ids : string list)
   then run_add e ~tools ids
   else (
     let s = scan e ~override_path:"" ~extra:tools in
-    let sections, _ = load_manifest e.fs "pkgs.txt" in
+    let sections, _ = load_manifest e.fs Manifest.filename in
     let dash = build_sections (to_dashboard_apps s.apps) sections s.info in
     let items = new_items ~extra:true dash in
     if items = []
     then [ "  nothing new to append" ]
     else (
-      match append_selected e.fs "pkgs.txt" items with
+      match append_selected e.fs Manifest.filename items with
       | Error e -> [ "  error: " ^ e ]
-      | Ok () -> [ Printf.sprintf "  appended %d app(s) to pkgs.txt" (List.length items) ]))
+      | Ok () ->
+        [ Printf.sprintf
+            "  appended %d app(s) to %s"
+            (List.length items)
+            Manifest.filename
+        ]))
 ;;
 
 (** [runAppendNew] (--new): newly-detected apps only (no pending updates). *)
 let run_append_new (e : env) ~(tools : Plugin.tool list) : string list =
   let s = scan e ~override_path:"" ~extra:tools in
-  let sections, _ = load_manifest e.fs "pkgs.txt" in
+  let sections, _ = load_manifest e.fs Manifest.filename in
   let dash = build_sections (to_dashboard_apps s.apps) sections s.info in
   let items = new_items dash in
   if items = []
   then [ "  no newly detected apps" ]
   else (
-    match append_selected e.fs "pkgs.txt" items with
+    match append_selected e.fs Manifest.filename items with
     | Error e -> [ "  error: " ^ e ]
-    | Ok () -> [ Printf.sprintf "  appended %d app(s) to pkgs.txt" (List.length items) ])
+    | Ok () ->
+      [ Printf.sprintf "  appended %d app(s) to %s" (List.length items) Manifest.filename
+      ])
 ;;
 
 (** [runExport]: scan → write manifest grouped in pm order, plus a
     [winget import]-compatible JSON next to it (same basename, [.json]
     extension). Only winget-tracked apps land in the JSON; the rest live
-    in the pkgs file alone. *)
+    in the manifest alone. *)
 let json_sibling (output : string) : string =
-  if Filename.check_suffix output ".txt"
-  then Filename.chop_suffix output ".txt" ^ ".json"
+  if Filename.check_suffix output ".toml"
+  then Filename.chop_suffix output ".toml" ^ ".json"
   else output ^ ".json"
 ;;
 
@@ -314,19 +319,26 @@ let run_export (e : env) ?(tools : Plugin.tool list = []) (output : string) : st
   if s.apps = []
   then [ "  no installed software found" ]
   else (
-    let buf = Buffer.create 512 in
-    Buffer.add_string buf "# Generated by devkit export\n";
-    List.iter
-      (fun pm ->
-         let apps = List.filter (fun (a : app) -> a.pm = pm) s.apps in
-         if apps <> []
-         then (
-           Buffer.add_string buf (Printf.sprintf "\n# %s\n" pm);
-           List.iter
-             (fun (a : app) -> Buffer.add_string buf (Printf.sprintf "%s:%s\n" pm a.name))
-             apps))
-      (order_for tools);
-    match e.fs.write_file output (Buffer.contents buf) with
+    let sections =
+      List.filter_map
+        (fun pm ->
+           let apps = List.filter (fun (a : app) -> a.pm = pm) s.apps in
+           match apps with
+           | [] -> None
+           | _ ->
+             Some
+               { name = pm
+               ; items =
+                   List.map
+                     (fun (a : app) ->
+                        { (make_item (Manifest.item_type_of_string a.pm) a.name) with
+                          installed_version = a.version
+                        })
+                     apps
+               })
+        (order_for tools)
+    in
+    match e.fs.write_file output (Manifest.to_string { sections; winget_path = "" }) with
     | Error e -> [ "  error: " ^ e ]
     | Ok () ->
       let json_path = json_sibling output in

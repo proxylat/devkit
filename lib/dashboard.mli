@@ -6,7 +6,7 @@ type app =
   ; pm : string
   }
 
-val format_ver : Pkgfile.item -> string
+val format_ver : Manifest.item -> string
 
 (** Merge the machine scan with manifest sections into dashboard sections:
     "Pending updates", "Newly detected", then the manifest sections minus
@@ -15,9 +15,9 @@ val format_ver : Pkgfile.item -> string
 val build_sections
   :  ?show:(string -> string option)
   -> app list
-  -> Pkgfile.section list
+  -> Manifest.section list
   -> Winget_parse.info Winget_parse.IdMap.t option
-  -> Pkgfile.section list
+  -> Manifest.section list
 
 (** Plain-text dashboard. Empty sections and "Newly detected" are skipped. *)
-val render : Pkgfile.section list -> string
+val render : Manifest.section list -> string
