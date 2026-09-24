@@ -379,14 +379,20 @@ let cached_path, reset_path_cache = make_path_cache ()
 
 (** Locate winget, downloading it when nothing resolves. A non-empty
     [~override_path] (the [# winget:] directive) is returned blindly: no
-    existence check. *)
-let ensure_full ~override_path ~resolve_path (io : io) : (string, string) result =
+    existence check. The download only ever runs on Windows ([~os]
+    injectable for tests): elsewhere winget cannot exist, so resolving
+    straight to an error instead of burning seconds on a doomed download. *)
+let ensure_full ~override_path ~resolve_path ?(os = Sys.os_type) (io : io)
+  : (string, string) result
+  =
   if override_path <> ""
   then Ok override_path
   else (
     let w = resolve_path io in
     if w <> ""
     then Ok w
+    else if os <> "Win32"
+    then Error "winget is only available on Windows"
     else (
       match download_winget io with
       | Ok _ as ok -> ok

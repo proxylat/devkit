@@ -11,8 +11,8 @@
       stays out.
     - No dead append helper: only wired commands ship.
     - [--new] appends every newly-detected app.
-    - [winget show] enrichment runs sequentially; parallelize when it
-      measurably hurts.
+    - [winget show] enrichment runs on up to 8 domains (see
+      [Dashboard.build_sections]); [ensure] never downloads off Windows.
     - pm order: [winget; npm; pipx; uv; cargo]. *)
 
 open Manifest

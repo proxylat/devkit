@@ -12,6 +12,31 @@ type app =
   ; pm : string
   }
 
+(** Map [f] over [xs] on up to 8 domains, results in input order. One
+    domain per item would drown short lists in thread overhead, so items
+    are chunked; empty chunks are skipped. Domain-safe as long as [f]
+    touches no shared mutable state (here: one process spawn per call). *)
+let par_map8 (f : 'a -> 'b) (xs : 'a list) : 'b list =
+  let arr = Array.of_list xs in
+  let n = Array.length arr in
+  if n = 0
+  then []
+  else (
+    let workers = min 8 n in
+    let chunk = (n + workers - 1) / workers in
+    let jobs =
+      List.filter_map
+        (fun w ->
+           let lo = w * chunk in
+           if lo >= n
+           then None
+           else Some (Array.sub arr lo (min chunk (n - lo)) |> Array.to_list))
+        (List.init workers Fun.id)
+    in
+    let doms = List.map (fun job -> Domain.spawn (fun () -> List.map f job)) jobs in
+    List.concat_map Domain.join doms)
+;;
+
 let status_symbol = function
   | Installed -> "✓"
   | NeedsUpdate -> "!"
@@ -104,8 +129,26 @@ let build_sections
          })
       pkgs_sections
   in
-  (* 2. `winget show` fallback for NotFound winget items (sequential here;
-     Go fans out to 8 workers; parallelism can return if this proves slow). *)
+  (* 2. `winget show` fallback for NotFound winget items: every missing
+     id is queried up front on up to 8 domains (each call is one process
+     spawn, ~1s on Windows; sequential was the startup bottleneck), then
+     the merge below reads from the table. *)
+  let show_ids =
+    List.concat_map
+      (fun sec ->
+         List.filter_map
+           (fun it ->
+              if it.typ = Winget && it.status = NotFound then Some it.value else None)
+           sec.items)
+      pkgs_sections
+  in
+  let show_table : (string, string option) Hashtbl.t =
+    Hashtbl.create (max 1 (List.length show_ids))
+  in
+  List.iter2
+    (fun id ver -> Hashtbl.replace show_table id ver)
+    show_ids
+    (par_map8 show show_ids);
   let pkgs_sections =
     List.map
       (fun sec ->
@@ -116,9 +159,9 @@ let build_sections
                   if it.typ <> Winget || it.status <> NotFound
                   then it
                   else (
-                    match show it.value with
-                    | None -> it
-                    | Some ver ->
+                    match Hashtbl.find_opt show_table it.value with
+                    | None | Some None -> it
+                    | Some (Some ver) ->
                       let it = { it with available_version = ver } in
                       let name = lower it.value in
                       (match Hashtbl.find_opt scan_lookup name with
