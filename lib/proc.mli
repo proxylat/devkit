@@ -10,3 +10,7 @@ val default_runner : runner
 (** Memoized [winget list --verbose] fetcher with resetter: one winget
     invocation per 8s window per resolved path. *)
 val winget_list : runner -> (string -> string option) * (unit -> unit)
+
+(** Map [f] over [xs] on up to 8 domains, results in input order.
+    Domain-safe as long as [f] touches no shared mutable state. *)
+val par_map8 : ('a -> 'b) -> 'a list -> 'b list

@@ -245,24 +245,29 @@ let scan_tool (run : Proc.runner) (t : Plugin.tool) : app list =
 ;;
 
 (** Full scan order: winget, npm, pipx, uv, cargo, then [extra] custom
-    tools in file order. [winget] is the memoized [winget list] fetch
-    ([Proc.winget_list]), so a scan followed by an update check spawns
-    winget once per window. *)
+    tools in file order. The winget fetch runs on its own domain while
+    the rest scan in parallel, so startup costs max(winget, slowest
+    other) instead of the sum. [winget] is the memoized [winget list]
+    fetch ([Proc.winget_list]), so a scan followed by an update check
+    spawns winget once per window. *)
 let scan_all
       (run : Proc.runner)
       ~(winget : unit -> string option)
       ~(extra : Plugin.tool list)
   : app list
   =
-  let winget_apps =
-    match winget () with
-    | None -> []
-    | Some out -> parse_winget out
+  let winget_dom =
+    Domain.spawn
+      (fun () ->
+         match winget () with
+         | None -> []
+         | Some out -> parse_winget out)
   in
   let apps =
-    List.concat_map
-      (fun (t : Plugin.tool) -> scan_tool run t)
-      [ npm_tool; pipx_tool; uv_tool; cargo_tool ]
+    List.concat
+      (Proc.par_map8
+         (scan_tool run)
+         ([ npm_tool; pipx_tool; uv_tool; cargo_tool ] @ extra))
   in
-  winget_apps @ apps @ List.concat_map (scan_tool run) extra
+  Domain.join winget_dom @ apps
 ;;
