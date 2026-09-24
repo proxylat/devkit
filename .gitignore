@@ -1,3 +1,7 @@
 _build/
 _opam/
 *.install
+# Local-only: personal machine inventory + operator notes, never commit.
+/devkit.toml
+/AGENTS.md
+/CHANGES.md
