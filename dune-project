@@ -4,7 +4,7 @@
 
 (generate_opam_files true)
 
-(source (github anomalyco/devkit))
+(source (github proxylat/devkit))
 (license MIT)
 (authors "devkit contributors")
 (maintainers "devkit contributors")
