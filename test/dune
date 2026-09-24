@@ -53,5 +53,9 @@
  (libraries devkit alcotest))
 
 (test
+ (name test_update)
+ (libraries devkit alcotest))
+
+(test
  (name test_proc)
  (libraries devkit alcotest))

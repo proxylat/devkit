@@ -1,4 +1,4 @@
 (library
  (name devkit)
  (libraries unix yojson digestif.c decompress.de sexplib re toml)
- (modules manifest winget_parse dashboard proc inventory strutil fetch hash gh zipx bootstrap install app winget_json plugin tui))
+ (modules manifest winget_parse dashboard proc inventory strutil fetch hash gh zipx bootstrap install app winget_json plugin tui update))
