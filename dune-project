@@ -12,7 +12,7 @@
 (package
  (name devkit)
  (synopsis "Cross package-manager inventory dashboard")
- (description "Scan your PC for installed software across package managers, merge the result with a pkgs.txt manifest, and export a restore-ready snapshot.")
+ (description "Scan your PC for installed software across package managers, merge the result with a devkit.toml manifest, and export a restore-ready snapshot.")
  (depends
   (ocaml (>= 5.2))
   (dune (>= 3.24))
@@ -21,5 +21,7 @@
   (digestif (>= 1.2))
   (decompress (>= 1.5))
   (sexplib (>= 0.17))
-  (re (>= 1.11))
+   (re (>= 1.11))
+   (toml (>= 7.0))
+   (notty (>= 0.2.3))
   (alcotest (and (>= 1.7) :with-test))))

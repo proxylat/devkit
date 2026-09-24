@@ -1,7 +1,7 @@
 (** Tests for {!Dashboard}: section merge and plain-text render. *)
 
 open Devkit
-open Pkgfile
+open Manifest
 
 let item typ value = make_item typ value
 

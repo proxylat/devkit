@@ -1,7 +1,7 @@
 # devkit
 
 Scan your PC for installed software across package managers, merge the
-result with a `pkgs.txt` manifest, and export a restore-ready snapshot.
+result with a `devkit.toml` manifest, and export a restore-ready snapshot.
 
 ## Build
 
@@ -24,19 +24,19 @@ generated (see AGENTS.md for the regen dance). Every `lib/*.ml` has a
 ```sh
 devkit                    # dashboard: manifest status, or full scan
 devkit import FILE        # preview a manifest against this machine
-devkit add ID...          # append installed apps to pkgs.txt
+devkit add ID...          # append installed apps to devkit.toml
 devkit append [--new]     # append newly-detected apps (or given ids)
-devkit export [-o FILE]   # write pkgs.txt + winget import-ready JSON
+devkit export [-o FILE]   # write devkit.toml + winget import-ready JSON
 ```
 
-`export` writes two files: the plain manifest (`pkgs.txt`) and a
+`export` writes two files: the TOML manifest (`devkit.toml`) and a
 `winget import -i`-compatible JSON sibling (schema 2.0.0, installed
 versions pinned; skipped when no winget apps are installed).
 
 ## Custom package managers (`tools.sexp`)
 
 Built-ins: winget, npm, pipx, uv, cargo. Anything else goes in an
-s-expression file — `tools.sexp` next to `pkgs.txt` first, then
+s-expression file — `tools.sexp` next to `devkit.toml` first, then
 `~/.config/devkit/tools.sexp` (`%LOCALAPPDATA%\devkit\tools.sexp` on
 Windows). First file wins per tool name; built-in names are reserved.
 
