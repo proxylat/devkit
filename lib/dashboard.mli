@@ -11,7 +11,8 @@ val format_ver : Manifest.item -> string
 
 (** Merge the machine scan with manifest sections into dashboard sections:
     "Pending updates", "Newly detected", then the manifest sections minus
-    their updated items. [show] enriches NotFound winget items via
+    their updated and installed items, then a trailing "Installed" section
+    so the table ends on green. [show] enriches NotFound winget items via
     [winget show]. [run] enables a single-spawn PATH probe: manifest
     items whose candidate command is on PATH (but missed by every PM
     scan) count as installed. [os] selects the probe shell (default:
