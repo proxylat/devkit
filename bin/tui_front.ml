@@ -109,14 +109,16 @@ let press_enter ~draw (deps : Install.deps) (st : Tui.state) : Tui.state Lwt.t =
          st
          item.Manifest.value
          (Install.install deps (kind_of item.Manifest.typ) item.Manifest.value update))
-  | Tui.Do_open url ->
+  | Tui.Do_open (item, url) ->
     (match deps.Install.open_browser url with
      | Ok () ->
-       let o = { Install.value = url; status = Install.Opened } in
-       Lwt.return (Tui.apply_outcome st url o)
+       let value = item.Manifest.value in
+       let o = { Install.value; status = Install.Opened } in
+       Lwt.return (Tui.apply_outcome st value o)
      | Error e ->
-       let o = { Install.value = url; status = Install.Failed e } in
-       Lwt.return (Tui.apply_outcome st url o))
+       let value = item.Manifest.value in
+       let o = { Install.value; status = Install.Failed e } in
+       Lwt.return (Tui.apply_outcome st value o))
 ;;
 
 let viewport (w : int) (h : int) : int * int = max 1 w, max 1 (h - 3)

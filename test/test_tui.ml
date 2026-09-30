@@ -58,8 +58,66 @@ let enter_mapping () =
    | _ -> Alcotest.fail "needsupdate installs");
   let s = Tui.step s Tui.Down in
   match Tui.enter_action s with
-  | Tui.Do_open u -> Alcotest.(check string) "url" "https://x" u
+  | Tui.Do_open (_, u) -> Alcotest.(check string) "url" "https://x" u
   | _ -> Alcotest.fail "manual opens"
+;;
+
+let litem typ status value =
+  { Manifest.typ; value; installed_version = "1.0"; available_version = ""; status }
+;;
+
+let enter_opens_links () =
+  let open_at typ status value =
+    let s =
+      Tui.make
+        [ { Manifest.name = "t"; items = [ litem typ status value ] } ]
+        ~height:10
+        ~width:80
+    in
+    Tui.enter_action s
+  in
+  (match open_at Manifest.Url Manifest.Installed "https://example.com/dl" with
+   | Tui.Do_open (it, u) ->
+     Alcotest.(check string) "row kept" "https://example.com/dl" it.Manifest.value;
+     Alcotest.(check string) "url opens" "https://example.com/dl" u
+   | _ -> Alcotest.fail "installed url opens");
+  (match open_at Manifest.GitHub Manifest.Installed "owner/tool" with
+   | Tui.Do_open (_, u) ->
+     Alcotest.(check string) "repo page" "https://github.com/owner/tool" u
+   | _ -> Alcotest.fail "installed github opens");
+  (match open_at Manifest.GitHub Manifest.Manual "owner/tool" with
+   | Tui.Do_open (_, u) ->
+     Alcotest.(check string) "manual repo page" "https://github.com/owner/tool" u
+   | _ -> Alcotest.fail "manual github opens");
+  match open_at Manifest.Winget Manifest.Installed "A.B" with
+  | Tui.Do_nothing -> ()
+  | _ -> Alcotest.fail "installed winget is noop"
+;;
+
+let open_keeps_status () =
+  (* Opening a link must not demote an installed row to manual. *)
+  let s =
+    Tui.make
+      [ { Manifest.name = "t"
+        ; items = [ litem Manifest.Url Manifest.Installed "https://x" ]
+        }
+      ]
+      ~height:10
+      ~width:80
+  in
+  let s =
+    Tui.apply_outcome
+      s
+      "https://x"
+      { Install.value = "https://x"; status = Install.Opened }
+  in
+  (match Tui.selected s with
+   | Some e ->
+     (match e.Tui.item.Manifest.status with
+      | Manifest.Installed -> ()
+      | _ -> Alcotest.fail "open keeps installed")
+   | None -> Alcotest.fail "no selection");
+  Alcotest.(check (option string)) "logs opened" (Some "https://x: opened") s.Tui.message
 ;;
 
 let enter_notfound () =
@@ -218,11 +276,13 @@ let () =
     ; ( "enter"
       , [ Alcotest.test_case "mapping" `Quick enter_mapping
         ; Alcotest.test_case "notfound" `Quick enter_notfound
+        ; Alcotest.test_case "opens links" `Quick enter_opens_links
         ] )
     ; ( "outcome"
       , [ Alcotest.test_case "success" `Quick apply_success
         ; Alcotest.test_case "failure keeps" `Quick apply_failure_keeps
         ; Alcotest.test_case "failure logs reason" `Quick apply_failure_logs_reason
+        ; Alcotest.test_case "open keeps status" `Quick open_keeps_status
         ; Alcotest.test_case "end state green" `Quick apply_to_sections_reflects_session
         ; Alcotest.test_case "set message" `Quick set_message
         ] )

@@ -25,6 +25,11 @@ type deps =
   ; tools : Plugin.tool list
   }
 
+(** The GitHub repo page for [repo] ([owner/name]). Used both as the
+    Enter target for installed link-like GitHub rows and as the fallback
+    when the release API is unreachable. *)
+val repo_page : string -> string
+
 (** Run a downloaded installer: [.msi] via [msiexec], [.exe] with silent
     switches, anything else refused. *)
 val run_installer : Bootstrap.spawn -> string -> (unit, string) result

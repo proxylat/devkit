@@ -94,20 +94,25 @@ let step (s : state) (a : action) : state =
 let selected (s : state) : entry option = List.nth_opt s.entries s.cursor
 
 (** What Enter does on the cursor row: installable statuses run the
-    installer, Manual rows open the URL, anything else is a no-op. *)
+    installer; Url rows always open the link; installed or manual GitHub
+    rows open the repo page; anything else is a no-op. [Do_open] carries
+    the row item for reporting plus the URL to open. *)
 type enter =
   | Do_install of item
-  | Do_open of string
+  | Do_open of item * string
   | Do_nothing
 
 let enter_action (s : state) : enter =
   match selected s with
   | None -> Do_nothing
   | Some e ->
-    (match e.item.status with
-     | NeedsUpdate | NotFound -> Do_install e.item
-     | Manual -> Do_open e.item.value
-     | Installed | New -> Do_nothing)
+    let it = e.item in
+    (match it.typ, it.status with
+     | _, (NeedsUpdate | NotFound) -> Do_install it
+     | Manifest.Url, _ -> Do_open (it, it.value)
+     | Manifest.GitHub, _ -> Do_open (it, Install.repo_page it.value)
+     | _, Manual -> Do_open (it, it.value)
+     | _, _ -> Do_nothing)
 ;;
 
 (** Row color by install status; the frontend maps this to terminal colors. *)
@@ -268,7 +273,12 @@ let apply_outcome (s : state) (value : string) (o : Install.outcome) : state =
   let status =
     match o.Install.status with
     | Install.Installed | Install.Updated -> Installed
-    | Install.Opened -> Manual
+    | Install.Opened ->
+      (* Opening a link changes nothing about the row: keep whatever it
+         showed, so Enter on an installed URL keeps its green check. *)
+      (match selected s with
+       | Some e when e.item.value = value -> e.item.status
+       | _ -> Manual)
     | Install.Skipped _ | Install.Failed _ ->
       (match selected s with
        | Some e when e.item.value = value -> e.item.status

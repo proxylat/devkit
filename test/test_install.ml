@@ -168,10 +168,19 @@ let test_github_no_asset_opens_page () =
   Alcotest.(check bool) "opened" true (r.Install.status = Install.Opened)
 ;;
 
-let test_github_api_error () =
-  let d = base_deps ~latest:(fun _ -> Error "HTTP 404") () in
+let test_github_api_error_opens_page () =
+  let opened = ref "" in
+  let d =
+    base_deps
+      ~latest:(fun _ -> Error "HTTP 404")
+      ~browser:(fun url ->
+        opened := url;
+        Ok ())
+      ()
+  in
   let r = Install.install d "github" "owner/tool" false in
-  Alcotest.(check bool) "failed" true (r.Install.status = Install.Failed "HTTP 404")
+  Alcotest.(check string) "repo page" "https://github.com/owner/tool" !opened;
+  Alcotest.(check bool) "opened" true (r.Install.status = Install.Opened)
 ;;
 
 let test_url_opens () =
@@ -340,7 +349,10 @@ let () =
     ; ( "github"
       , [ Alcotest.test_case "happy path" `Quick test_github_happy
         ; Alcotest.test_case "no asset opens page" `Quick test_github_no_asset_opens_page
-        ; Alcotest.test_case "api error" `Quick test_github_api_error
+        ; Alcotest.test_case
+            "api error opens page"
+            `Quick
+            test_github_api_error_opens_page
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "url opens" `Quick test_url_opens

@@ -51,7 +51,7 @@ val color_of : status -> color
 
 type enter =
   | Do_install of item
-  | Do_open of string
+  | Do_open of item * string
   | Do_nothing
 
 val enter_action : state -> enter

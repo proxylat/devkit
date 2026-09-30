@@ -123,14 +123,21 @@ let install_winget (d : deps) (id : string) (update : bool) : outcome =
     else fail id ("winget " ^ String.concat " " args ^ " failed: " ^ String.trim out))
 ;;
 
+let repo_page (repo : string) : string = "https://github.com/" ^ repo
+
 let install_github (d : deps) (repo : string) : outcome =
   match d.latest_release repo with
-  | Error e -> fail repo e
+  | Error _ ->
+    (* API unreachable: fall back to opening the repo page, mirroring
+       the no-asset fallback below, so a link-like row never dead-ends. *)
+    (match d.open_browser (repo_page repo) with
+     | Ok () -> succeed repo Opened
+     | Error e -> fail repo e)
   | Ok rel ->
     (match Gh.match_by_arch rel.Gh.assets with
      | None ->
        (* No Windows installer asset: open the release page instead. *)
-       let page = "https://github.com/" ^ repo ^ "/releases/latest" in
+       let page = repo_page repo ^ "/releases/latest" in
        (match d.open_browser page with
         | Ok () -> succeed repo Opened
         | Error e -> fail repo e)
