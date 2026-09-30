@@ -4,9 +4,12 @@
     on Enter. On exit the plain-text dashboard plus the install log go
     to stdout, so redirected output stays usable. Lambda-term (unlike
     notty) has a real Windows backend, so this frontend     serves both
-    OSes. Installs and update checks run synchronously (the event loop
-    freezes) but paint a status line first, so the screen states what is
-    running instead of looking dead.
+    OSes. The scan runs on a preemptive worker behind an instant loading
+    frame (quit/resize stay live); installs and update checks run
+    synchronously (the event loop freezes) but paint a status line first,
+    so the screen states what is running instead of looking dead.
+    Install failures log the full reason ([id: error: ...]), not the
+    bare status.
     Mouse reporting is on for wheel-scroll only; other mouse events are
     ignored. *)
 
@@ -146,24 +149,48 @@ let draw_all (term : LTerm.t) (st : Tui.state) : unit Lwt.t =
   LTerm.flush term
 ;;
 
+let empty_scan_message (s : App.scan) : string option =
+  if s.App.apps <> []
+  then None
+  else if s.App.winget <> ""
+  then Some ("empty scan; winget at " ^ s.App.winget)
+  else if s.App.winget_error <> ""
+  then Some ("empty scan; " ^ s.App.winget_error)
+  else Some "empty scan; winget not found"
+;;
+
 let run ~(tools : Plugin.tool list) (env : App.env) : unit =
-  (* The scan below spawns winget + 4 PMs (~2s on Windows) before the
-     first frame draws; stderr stays visible so the wait looks alive. *)
+  (* First frame draws instantly with a loading row; the scan below
+     (winget + 4 PMs, ~2s on Windows) runs on a preemptive worker while
+     the event loop stays responsive to quit/resize. Stderr stays visible
+     so the wait looks alive past the alternate screen. *)
   prerr_endline "scanning installed software...";
   flush stderr;
-  let sections, winget_path = App.load_manifest env.App.fs Manifest.filename in
-  let s = App.scan env ~override_path:winget_path ~extra:tools in
-  let show id =
-    match App.winget_show env.App.bio s.App.winget id with
-    | "" -> None
-    | v -> Some v
+  let do_scan () =
+    let sections, winget_path = App.load_manifest env.App.fs Manifest.filename in
+    let s = App.scan env ~override_path:winget_path ~extra:tools in
+    let show id =
+      match App.winget_show env.App.bio s.App.winget id with
+      | "" -> None
+      | v -> Some v
+    in
+    let dash =
+      Dashboard.build_sections
+        ~show
+        ~run:(Some env.App.run)
+        s.App.apps
+        sections
+        s.App.info
+    in
+    dash, s, winget_path
   in
-  let dash =
-    Dashboard.build_sections ~show ~run:(Some env.App.run) s.App.apps sections s.App.info
+  let cleanup term mode =
+    LTerm.disable_mouse term
+    >>= fun () ->
+    LTerm.load_state term
+    >>= fun () -> LTerm.leave_raw_mode term mode >>= fun () -> LTerm.show_cursor term
   in
-  let fetch = Fetch.curl_fetch Proc.default_runner in
-  let deps = Install.real_deps fetch ~winget_override:winget_path () in
-  let final =
+  let outcome =
     Lwt_main.run
       (Lazy.force LTerm.stdout
        >>= fun term ->
@@ -179,67 +206,95 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
        >>= fun () ->
        let geom = LTerm.size term in
        let vw, vh = viewport geom.LTerm_geom.cols geom.LTerm_geom.rows in
-       (* Draw, then wait: events that change nothing skip the repaint. *)
-       let rec draw_loop (st : Tui.state) : Tui.state Lwt.t =
-         draw_all term st >>= fun () -> wait_loop st
-       and wait_loop (st : Tui.state) : Tui.state Lwt.t =
-         LTerm.read_event term
-         >>= fun ev ->
-         match classify ev with
-         | Quit -> Lwt.return st
-         | Nothing -> wait_loop st
-         | Enter -> press_enter ~draw:(draw_all term) deps st >>= draw_loop
-         | Update -> press_u ~draw:(draw_all term) env.App.run fetch st >>= draw_loop
-         | Action a -> draw_loop (Tui.step st a)
-         | Resized g ->
-           LTerm.clear_screen term
-           >>= fun () ->
-           let vw, vh = viewport g.LTerm_geom.cols g.LTerm_geom.rows in
-           draw_loop (Tui.resize st ~height:vh ~width:vw)
+       (* Main loop once the scan lands: draws, then waits. Events that
+          change nothing skip the repaint. *)
+       let main_loop deps fetch init =
+         let rec draw_loop (st : Tui.state) : Tui.state Lwt.t =
+           draw_all term st >>= fun () -> wait_loop st
+         and wait_loop (st : Tui.state) : Tui.state Lwt.t =
+           LTerm.read_event term
+           >>= fun ev ->
+           match classify ev with
+           | Quit -> Lwt.return st
+           | Nothing -> wait_loop st
+           | Enter -> press_enter ~draw:(draw_all term) deps st >>= draw_loop
+           | Update -> press_u ~draw:(draw_all term) env.App.run fetch st >>= draw_loop
+           | Action a -> draw_loop (Tui.step st a)
+           | Resized g ->
+             LTerm.clear_screen term
+             >>= fun () ->
+             let vw, vh = viewport g.LTerm_geom.cols g.LTerm_geom.rows in
+             draw_loop (Tui.resize st ~height:vh ~width:vw)
+         in
+         draw_loop init
        in
-       let init = Tui.make dash ~height:vh ~width:vw in
-       let init =
-         if s.App.apps = []
-         then
-           Tui.set_message
-             init
-             (if s.App.winget <> ""
-              then "empty scan; winget at " ^ s.App.winget
-              else if s.App.winget_error <> ""
-              then "empty scan; " ^ s.App.winget_error
-              else "empty scan; winget not found")
-         else init
+       let loading =
+         Tui.set_message
+           (Tui.make [] ~height:vh ~width:vw)
+           "scanning installed software..."
        in
-       draw_loop init
-       >>= fun st ->
-       LTerm.disable_mouse term
+       draw_all term loading
        >>= fun () ->
-       LTerm.load_state term
-       >>= fun () ->
-       LTerm.leave_raw_mode term mode
-       >>= fun () -> LTerm.show_cursor term >>= fun () -> Lwt.return st)
+       let scan_job = Lwt_preemptive.detach do_scan () in
+       let rec wait_scan (st : Tui.state)
+         : [ `Done of Manifest.section list * App.scan * Tui.state | `Quit ] Lwt.t
+         =
+         Lwt.pick
+           [ (scan_job >|= fun r -> `Scan r)
+           ; (LTerm.read_event term >|= fun e -> `Event e)
+           ]
+         >>= function
+         | `Scan (dash, s, winget_path) ->
+           let fetch = Fetch.curl_fetch Proc.default_runner in
+           let deps = Install.real_deps fetch ~winget_override:winget_path () in
+           let init = Tui.make dash ~height:st.Tui.height ~width:st.Tui.width in
+           let init =
+             match empty_scan_message s with
+             | None -> init
+             | Some m -> Tui.set_message init m
+           in
+           main_loop deps fetch init
+           >>= fun final ->
+           cleanup term mode >>= fun () -> Lwt.return (`Done (dash, s, final))
+         | `Event ev ->
+           (match classify ev with
+            | Quit ->
+              Lwt.cancel scan_job;
+              cleanup term mode >>= fun () -> Lwt.return `Quit
+            | Resized g ->
+              LTerm.clear_screen term
+              >>= fun () ->
+              let vw, vh = viewport g.LTerm_geom.cols g.LTerm_geom.rows in
+              let st = Tui.resize st ~height:vh ~width:vw in
+              draw_all term st >>= fun () -> wait_scan st
+            | _ -> wait_scan st)
+       in
+       wait_scan loading)
   in
-  print_string (Dashboard.render dash);
-  List.iter print_endline final.Tui.log;
-  (* An empty scan behind a double-clicked window would vanish with the
+  match outcome with
+  | `Quit -> ()
+  | `Done (dash, s, final) ->
+    print_string (Dashboard.render dash);
+    List.iter print_endline final.Tui.log;
+    (* An empty scan behind a double-clicked window would vanish with the
      console: leave the diagnostics readable until a keypress. Normal
      runs (and piped stdin) never pause. *)
-  if s.App.apps = []
-  then (
-    let winget =
-      if s.App.winget <> ""
-      then "winget: " ^ s.App.winget
-      else if s.App.winget_error <> ""
-      then "winget error: " ^ s.App.winget_error
-      else "winget: not found"
-    in
-    print_endline ("  no installed software found\n  " ^ winget);
-    try
-      if Unix.isatty Unix.stdin
-      then (
-        print_string "Press Enter to exit...";
-        flush stdout;
-        ignore (input_line stdin))
-    with
-    | _ -> ())
+    if s.App.apps = []
+    then (
+      let winget =
+        if s.App.winget <> ""
+        then "winget: " ^ s.App.winget
+        else if s.App.winget_error <> ""
+        then "winget error: " ^ s.App.winget_error
+        else "winget: not found"
+      in
+      print_endline ("  no installed software found\n  " ^ winget);
+      try
+        if Unix.isatty Unix.stdin
+        then (
+          print_string "Press Enter to exit...";
+          flush stdout;
+          ignore (input_line stdin))
+      with
+      | _ -> ())
 ;;

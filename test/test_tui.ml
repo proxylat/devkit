@@ -169,6 +169,29 @@ let set_message () =
   Alcotest.(check bool) "logged" true (List.mem "installing b ..." s.Tui.log)
 ;;
 
+let apply_failure_logs_reason () =
+  let s = Tui.make (sections ()) ~height:10 ~width:80 in
+  let s = Tui.step s Tui.Down in
+  let s =
+    Tui.apply_outcome s "b" { Install.value = "b"; status = Install.Failed "denied" }
+  in
+  Alcotest.(check string)
+    "full reason kept"
+    "b: error: denied"
+    (List.hd (List.rev s.Tui.log));
+  let s = Tui.make (sections ()) ~height:10 ~width:80 in
+  let s =
+    Tui.apply_outcome
+      s
+      "a"
+      { Install.value = "a"; status = Install.Skipped "no template" }
+  in
+  Alcotest.(check string)
+    "skip reason kept"
+    "a: skip: no template"
+    (List.hd (List.rev s.Tui.log))
+;;
+
 let () =
   Alcotest.run
     "tui"
@@ -185,6 +208,7 @@ let () =
     ; ( "outcome"
       , [ Alcotest.test_case "success" `Quick apply_success
         ; Alcotest.test_case "failure keeps" `Quick apply_failure_keeps
+        ; Alcotest.test_case "failure logs reason" `Quick apply_failure_logs_reason
         ; Alcotest.test_case "set message" `Quick set_message
         ] )
     ; ( "frame"
