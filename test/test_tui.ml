@@ -192,6 +192,20 @@ let apply_failure_logs_reason () =
     (List.hd (List.rev s.Tui.log))
 ;;
 
+let apply_to_sections_reflects_session () =
+  let secs = sections () in
+  let s = Tui.make secs ~height:10 ~width:80 in
+  let s = Tui.step s Tui.Down in
+  let s = Tui.apply_outcome s "b" { Install.value = "b"; status = Install.Updated } in
+  let out = Tui.apply_to_sections secs s in
+  let b =
+    List.concat_map (fun sec -> sec.Manifest.items) out
+    |> List.find (fun it -> it.Manifest.value = "b")
+  in
+  Alcotest.(check bool) "installed at end" true (b.Manifest.status = Manifest.Installed);
+  Alcotest.(check bool) "renders green" true (Tui.color_of b.Manifest.status = Tui.Green)
+;;
+
 let () =
   Alcotest.run
     "tui"
@@ -209,6 +223,7 @@ let () =
       , [ Alcotest.test_case "success" `Quick apply_success
         ; Alcotest.test_case "failure keeps" `Quick apply_failure_keeps
         ; Alcotest.test_case "failure logs reason" `Quick apply_failure_logs_reason
+        ; Alcotest.test_case "end state green" `Quick apply_to_sections_reflects_session
         ; Alcotest.test_case "set message" `Quick set_message
         ] )
     ; ( "frame"

@@ -284,6 +284,34 @@ let apply_outcome (s : state) (value : string) (o : Install.outcome) : state =
   clamp { s with entries; message = Some line; log = s.log @ [ line ] }
 ;;
 
+(** Overlay the session's row statuses back onto dashboard sections, so a
+    re-render after the TUI exits shows the end state: successful installs
+    come out green instead of the pre-session snapshot. Lookup is by
+    lowercased value, mirroring {!apply_outcome}. *)
+let apply_to_sections (sections : section list) (s : state) : section list =
+  let table : (string, item) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun e -> Hashtbl.replace table (String.lowercase_ascii e.item.value) e.item)
+    s.entries;
+  List.map
+    (fun (sec : section) ->
+       { sec with
+         items =
+           List.map
+             (fun (it : item) ->
+                match Hashtbl.find_opt table (String.lowercase_ascii it.value) with
+                | None -> it
+                | Some fresh ->
+                  { it with
+                    status = fresh.status
+                  ; installed_version = fresh.installed_version
+                  ; available_version = fresh.available_version
+                  })
+             sec.items
+       })
+    sections
+;;
+
 (** Mark rows with available updates: set available_version +
     [NeedsUpdate] by value, with a summary message + log. An empty
     result keeps every row and reports everything current. *)

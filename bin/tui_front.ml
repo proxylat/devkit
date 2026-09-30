@@ -274,6 +274,9 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
   match outcome with
   | `Quit -> ()
   | `Done (dash, s, final) ->
+    (* Re-render from the end state, so successful installs show green
+       instead of the pre-session snapshot. *)
+    let dash = Tui.apply_to_sections dash final in
     print_string (Dashboard.render dash);
     List.iter print_endline final.Tui.log;
     (* An empty scan behind a double-clicked window would vanish with the
