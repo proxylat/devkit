@@ -58,4 +58,4 @@
 
 (test
  (name test_proc)
- (libraries devkit alcotest))
+ (libraries devkit alcotest unix))

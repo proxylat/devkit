@@ -98,12 +98,17 @@ let parse_pipx (output : string) : app list =
 ;;
 
 (** [uv tool list]: [name vX.Y.Z] headers with [- exe] shim lines beneath.
-    [Failed to parse entry …] warnings are skipped. *)
+    [Failed to parse entry …] warnings and the empty-installation notice
+    ([No tools installed]) are skipped. *)
 let parse_uv (output : string) : app list =
   List.filter_map
     (fun raw ->
        let line = String.trim raw in
-       if line = "" || line.[0] = '-' || Strutil.contains_substring "Failed to parse" line
+       if
+         line = ""
+         || line.[0] = '-'
+         || line = "No tools installed"
+         || Strutil.contains_substring "Failed to parse" line
        then None
        else (
          match fields line with

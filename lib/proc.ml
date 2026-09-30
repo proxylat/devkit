@@ -7,21 +7,35 @@
     success, [None] when the program is missing or exits non-zero. *)
 type runner = string -> string list -> string option
 
-(** Real runner on top of [Unix.open_process_args_in]. *)
+(** Drain [ic] to a string. Exposed so {!Bootstrap.real_spawn} shares the
+    same pipe handling. *)
+let drain (ic : in_channel) : string =
+  let buf = Buffer.create 256 in
+  (try
+     while true do
+       Buffer.add_channel buf ic 4096
+     done
+   with
+   | End_of_file -> ());
+  Buffer.contents buf
+;;
+
+(** Real runner on top of [Unix.open_process_args_full]. Stdout is
+    returned trimmed on exit 0; stderr is drained on a domain and
+    dropped, so chatty tools (uv's "No tools installed" notice) never
+    reach our terminal. Draining both pipes concurrently means a full
+    stderr pipe cannot wedge a child that is still writing stdout. *)
 let default_runner : runner =
   fun prog args ->
   try
     let cmd = Array.of_list (prog :: args) in
-    let ic = Unix.open_process_args_in prog cmd in
-    let buf = Buffer.create 256 in
-    (try
-       while true do
-         Buffer.add_channel buf ic 4096
-       done
-     with
-     | End_of_file -> ());
-    let out = Buffer.contents buf in
-    match Unix.close_process_in ic with
+    let out_ic, in_oc, err_ic =
+      Unix.open_process_args_full prog cmd (Unix.environment ())
+    in
+    let err_reader = Domain.spawn (fun () -> drain err_ic) in
+    let out = drain out_ic in
+    let _stderr : string = Domain.join err_reader in
+    match Unix.close_process_full (out_ic, in_oc, err_ic) with
     | Unix.WEXITED 0 -> Some (String.trim out)
     | _ -> None
   with

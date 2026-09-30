@@ -4,8 +4,12 @@
     success, [None] when the program is missing or exits non-zero. *)
 type runner = string -> string list -> string option
 
-(** Real runner on top of [Unix.open_process_args_in]. *)
+(** Real runner on top of [Unix.open_process_args_full]: stderr is
+    drained, never inherited, and dropped. *)
 val default_runner : runner
+
+(** Drain a channel to a string. *)
+val drain : in_channel -> string
 
 (** Memoized [winget list --verbose] fetcher with resetter: one winget
     invocation per 8s window per resolved path. *)
