@@ -86,7 +86,9 @@ let candidates (it : item) : string list =
     1. "Pending updates": manifest items needing update, plus
        non-manifest installed apps that have an Available version.
     2. "Newly detected": other installed apps missing from the manifest.
-    3. The manifest sections minus their updated items.
+    3. The manifest sections minus their updated and installed items.
+    4. "Installed": the manifest items already at their latest version,
+       trailing the table so the run ends on green.
     A manifest section literally named "winget" is dropped (it is a
     leftover artifact, never real content). *)
 let build_sections
@@ -247,8 +249,11 @@ let build_sections
                }
                :: !man_updates))
        ids);
-  (* 4. Split manifest updates out, preserving name and order. *)
+  (* 4. Split manifest updates and installed apps out, preserving name
+     and order: updates join "Pending updates" up top, installed rows
+     join the trailing "Installed" section. *)
   let man_rest = ref [] in
+  let done_items = ref [] in
   List.iter
     (fun sec ->
        let rest_items = ref [] in
@@ -256,15 +261,19 @@ let build_sections
          (fun it ->
             if it.status = NeedsUpdate
             then man_updates := it :: !man_updates
+            else if it.status = Installed
+            then done_items := it :: !done_items
             else rest_items := it :: !rest_items)
          sec.items;
        let rest_items = List.rev !rest_items in
        if rest_items <> [] then man_rest := { sec with items = rest_items } :: !man_rest)
     pkgs_sections;
-  (* NOTE: man_updates is accumulated in reverse in steps 3 and 4. Go appends
-     non-manifest updates first, then manifest updates in section order;
-     reversing once at the end reproduces exactly that. *)
+  (* NOTE: man_updates and done_items accumulate in reverse in steps 3
+     and 4. Go appends non-manifest updates first, then manifest updates
+     in section order; reversing once at the end reproduces exactly that.
+     Installed rows likewise un-reverse into section order. *)
   let man_updates = List.rev !man_updates in
+  let done_items = List.rev !done_items in
   (* 5. Newly-detected installed apps. *)
   let pkg_names : (string, unit) Hashtbl.t = Hashtbl.create 64 in
   List.iter
@@ -307,13 +316,17 @@ let build_sections
        ids);
   let new_items = List.rev !new_items in
   (* 6. Final order, minus the raw "winget" artifact section.
-     man_rest was consed in section order, so it is reversed back here. *)
+     man_rest was consed in section order, so it is reversed back here.
+     Installed trails the table so the run ends on green. *)
   let sections : section list ref = ref [] in
   if man_updates <> []
   then sections := [ { name = "Pending updates"; items = (man_updates : item list) } ];
   if new_items <> []
   then sections := !sections @ [ { name = "Newly detected"; items = new_items } ];
   sections := !sections @ List.rev !man_rest;
+  if done_items <> []
+  then
+    sections := !sections @ [ { name = "Installed"; items = (done_items : item list) } ];
   List.filter
     (fun (sec : section) -> String.lowercase_ascii sec.name <> "winget")
     !sections

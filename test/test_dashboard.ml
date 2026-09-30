@@ -126,6 +126,14 @@ let render_fixture () =
           ; { (item GitHub "owner/tool") with status = Manual }
           ]
       }
+    ; { name = "Installed"
+      ; items =
+          [ { (item Winget "Brave.Brave") with
+              installed_version = "1.80"
+            ; status = Installed
+            }
+          ]
+      }
     ; { name = "Empty"; items = [] }
     ]
   in
@@ -139,6 +147,9 @@ let render_fixture () =
     ^ "RUNTIMES\n"
     ^ "  [+] Missing.App\n"
     ^ "  [~] owner/tool\n"
+    ^ "\n"
+    ^ "INSTALLED\n"
+    ^ "  [✓] Brave.Brave 1.80\n"
     ^ "\n"
   in
   Alcotest.(check string) "exact render" expected (Dashboard.render sections)
@@ -158,16 +169,44 @@ let render_versions () =
 
 let basename_match () =
   (* scan name "bar" matches manifest "Foo.Bar" via basename candidate,
-     carrying the scanned version. *)
+     carrying the scanned version into the trailing Installed section. *)
   let manifest = [ { name = "Tools"; items = [ item Winget "Foo.Bar" ] } ] in
   let apps = [ Dashboard.{ name = "bar"; version = "1.0"; pm = "winget" } ] in
   let sections = Dashboard.build_sections apps manifest None in
   Alcotest.(check int) "one section" 1 (List.length sections);
+  Alcotest.(check string) "installed last" "Installed" (List.nth sections 0).name;
   let it = List.nth (List.nth sections 0).items 0 in
   Alcotest.(check string) "version carried" "1.0" it.installed_version;
   match it.status with
   | Installed -> ()
   | _ -> Alcotest.fail "basename should match"
+;;
+
+let installed_last () =
+  (* updates stay up top, missing rows keep their section, installed rows
+     trail the table in section order. *)
+  let manifest =
+    [ { name = "Tools"
+      ; items =
+          [ item Winget "Git.Git"; item Winget "Brave.Brave"; item Winget "Missing.App" ]
+      }
+    ]
+  in
+  let info =
+    winget_info
+      [ "Git.Git", "Git", "2.47.1", "2.48.0"; "Brave.Brave", "Brave", "1.80", "1.80" ]
+  in
+  let sections = Dashboard.build_sections [] manifest (Some info) in
+  Alcotest.(check int) "three sections" 3 (List.length sections);
+  Alcotest.(check string) "pending first" "Pending updates" (List.nth sections 0).name;
+  Alcotest.(check string) "manifest middle" "Tools" (List.nth sections 1).name;
+  Alcotest.(check string) "installed last" "Installed" (List.nth sections 2).name;
+  let it = List.nth (List.nth sections 2).items 0 in
+  Alcotest.(check string) "installed value" "Brave.Brave" it.value;
+  (match it.status with
+   | Installed -> ()
+   | _ -> Alcotest.fail "brave should be Installed");
+  Alcotest.(check bool) "renders green" true (Tui.color_of it.status = Tui.Green)
 ;;
 
 let url_stem_match () =
@@ -177,6 +216,7 @@ let url_stem_match () =
   in
   let apps = [ Dashboard.{ name = "widget-2.0"; version = "2.0"; pm = "manual" } ] in
   let sections = Dashboard.build_sections apps manifest None in
+  Alcotest.(check string) "installed last" "Installed" (List.nth sections 0).name;
   let it = List.nth (List.nth sections 0).items 0 in
   match it.status with
   | Installed -> ()
@@ -196,6 +236,7 @@ let path_probe_rescue () =
   in
   let sections = Dashboard.build_sections ~os:"Unix" ~run:(Some run) [] manifest None in
   Alcotest.(check int) "single spawn" 1 !calls;
+  Alcotest.(check string) "installed last" "Installed" (List.nth sections 0).name;
   let it = List.nth (List.nth sections 0).items 0 in
   Alcotest.(check string) "no version" "" it.installed_version;
   match it.status with
@@ -228,6 +269,7 @@ let () =
         ; Alcotest.test_case "show fallback" `Quick show_fallback
         ; Alcotest.test_case "show fallback many" `Quick show_fallback_many
         ; Alcotest.test_case "basename match" `Quick basename_match
+        ; Alcotest.test_case "installed last" `Quick installed_last
         ; Alcotest.test_case "url stem match" `Quick url_stem_match
         ; Alcotest.test_case "PATH probe rescue" `Quick path_probe_rescue
         ; Alcotest.test_case "PATH probe miss" `Quick path_probe_miss
