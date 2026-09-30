@@ -55,6 +55,39 @@ let win_basenames () =
      String.length s >= 9 && String.sub s (String.length s - 9) 9 = "|| exit 0")
 ;;
 
+(** Child stderr never reaches our terminal: it is drained and dropped
+    while stdout is returned. The test's own stderr is parked in a temp
+    file around the spawn to prove nothing leaks. *)
+let stderr_dropped () =
+  let prog, args =
+    if Sys.os_type = "Win32" || Sys.os_type = "Cygwin"
+    then "cmd", [ "/c"; "echo BOOM 1>&2 & echo hi" ]
+    else "sh", [ "-c"; "echo BOOM >&2; echo hi" ]
+  in
+  let tmp = Filename.temp_file "devkit-err-" ".log" in
+  let fd = Unix.openfile tmp [ Unix.O_WRONLY ] 0 in
+  let saved = Unix.dup Unix.stderr in
+  Unix.dup2 fd Unix.stderr;
+  let r =
+    match Proc.default_runner prog args with
+    | v ->
+      Unix.dup2 saved Unix.stderr;
+      v
+    | exception e ->
+      Unix.dup2 saved Unix.stderr;
+      raise e
+  in
+  Unix.close saved;
+  Unix.close fd;
+  Alcotest.(check (option string)) "stdout kept" (Some "hi") r;
+  let ic = open_in_bin tmp in
+  let n = in_channel_length ic in
+  let leaked = really_input_string ic n in
+  close_in ic;
+  Sys.remove tmp;
+  Alcotest.(check string) "stderr clean" "" leaked
+;;
+
 let () =
   Alcotest.run
     "proc"
@@ -64,5 +97,6 @@ let () =
         ; Alcotest.test_case "unix empty" `Quick unix_empty
         ; Alcotest.test_case "win basenames" `Quick win_basenames
         ] )
+    ; "runner", [ Alcotest.test_case "stderr dropped" `Quick stderr_dropped ]
     ]
 ;;

@@ -20,23 +20,24 @@
     failure: the installer needs winget's text even on non-zero exit. *)
 type spawn = string -> string list -> string * bool
 
-(** Real backend on top of [Unix.open_process_args_in]. *)
+(** Real backend on top of [Unix.open_process_args_full]. Stderr is
+    merged into the returned text (the "combined output" this type
+    promises), drained on a domain concurrently with stdout so neither
+    pipe can wedge the child, and never reaches our terminal. *)
 let real_spawn : spawn =
   fun prog args ->
   try
     let cmd = Array.of_list (prog :: args) in
-    let ic = Unix.open_process_args_in prog cmd in
-    let buf = Buffer.create 256 in
-    (try
-       while true do
-         Buffer.add_channel buf ic 4096
-       done
-     with
-     | End_of_file -> ());
-    let out = String.trim (Buffer.contents buf) in
-    match Unix.close_process_in ic with
-    | Unix.WEXITED 0 -> out, true
-    | _ -> out, false
+    let out_ic, in_oc, err_ic =
+      Unix.open_process_args_full prog cmd (Unix.environment ())
+    in
+    let err_reader = Domain.spawn (fun () -> Proc.drain err_ic) in
+    let out = Proc.drain out_ic in
+    let err = Domain.join err_reader in
+    let combined = String.trim (String.trim out ^ "\n" ^ String.trim err) in
+    match Unix.close_process_full (out_ic, in_oc, err_ic) with
+    | Unix.WEXITED 0 -> combined, true
+    | _ -> combined, false
   with
   | _ -> "", false
 ;;

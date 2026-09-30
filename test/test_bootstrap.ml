@@ -462,6 +462,19 @@ let test_cache_memoizes () =
   Alcotest.(check string) "reset clears" "" (get io2)
 ;;
 
+(** [real_spawn] merges stderr into the returned text instead of leaking
+    it to the terminal, keeping the exit bit. *)
+let test_real_spawn_merges_stderr () =
+  let prog, args =
+    if Sys.os_type = "Win32" || Sys.os_type = "Cygwin"
+    then "cmd", [ "/c"; "echo OUT & echo ERR 1>&2 & exit 1" ]
+    else "sh", [ "-c"; "echo OUT; echo ERR >&2; exit 1" ]
+  in
+  let out, ok = Devkit.Bootstrap.real_spawn prog args in
+  Alcotest.(check string) "both streams" "OUT\nERR" out;
+  Alcotest.(check bool) "exit bit" false ok
+;;
+
 let () =
   Alcotest.run
     "bootstrap"
@@ -516,5 +529,7 @@ let () =
         ; Alcotest.test_case "missing exe" `Quick test_download_missing_exe
         ] )
     ; "cache", [ Alcotest.test_case "memoizes + resets" `Quick test_cache_memoizes ]
+    ; ( "real_spawn"
+      , [ Alcotest.test_case "stderr merged" `Quick test_real_spawn_merges_stderr ] )
     ]
 ;;

@@ -52,6 +52,10 @@ let uv_skips () =
 
 let uv_empty () = check_apps "uv empty" [] (Inventory.parse_uv "")
 
+let uv_notice () =
+  check_apps "uv empty-installation notice" [] (Inventory.parse_uv "No tools installed\n")
+;;
+
 let cargo () =
   check_apps
     "cargo rows"
@@ -127,6 +131,7 @@ let () =
         ; Alcotest.test_case "uv" `Quick uv
         ; Alcotest.test_case "uv skips" `Quick uv_skips
         ; Alcotest.test_case "uv empty" `Quick uv_empty
+        ; Alcotest.test_case "uv notice" `Quick uv_notice
         ; Alcotest.test_case "cargo" `Quick cargo
         ; Alcotest.test_case "winget" `Quick winget
         ] )
