@@ -15,7 +15,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: ocaml/setup-ocaml@v3
         with:
@@ -48,7 +48,7 @@ jobs:
 
       - name: Upload windows exe
         if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: devkit-windows
           path: _build/default/bin/devkit.exe
@@ -56,7 +56,7 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: ocaml/setup-ocaml@v3
         with:
