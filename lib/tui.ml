@@ -254,7 +254,16 @@ let set_message (s : state) (m : string) : state =
   { s with message = Some m; log = s.log @ [ m ] }
 ;;
 
-(** Record an install outcome: refresh the row status, append the log. *)
+(** Record an install outcome: refresh the row status, append the log.
+    The log keeps the full [Failed]/[Skipped] reason instead of the bare
+    short status, so a row like [Audacity.Audacity: error: ...] explains
+    itself without a second lookup. *)
+let outcome_line (value : string) : Install.status -> string = function
+  | Install.Failed m -> if m = "" then value ^ ": error" else value ^ ": error: " ^ m
+  | Install.Skipped m -> if m = "" then value ^ ": skip" else value ^ ": skip: " ^ m
+  | st -> Printf.sprintf "%s: %s" value (Install.status_to_string st)
+;;
+
 let apply_outcome (s : state) (value : string) (o : Install.outcome) : state =
   let status =
     match o.Install.status with
@@ -271,7 +280,7 @@ let apply_outcome (s : state) (value : string) (o : Install.outcome) : state =
          if e.item.value = value then { e with item = { e.item with status } } else e)
       s.entries
   in
-  let line = Printf.sprintf "%s: %s" value (Install.status_to_string o.Install.status) in
+  let line = outcome_line value o.Install.status in
   clamp { s with entries; message = Some line; log = s.log @ [ line ] }
 ;;
 
