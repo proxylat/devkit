@@ -8,7 +8,8 @@ let basic =
    name = \"tools\"\n\n\
    [[section.package]]\n\
    pm = \"winget\"\n\
-   id = \"Git.Git\"\n\n\
+   id = \"Git.Git\"\n\
+   upstream = \"git/git\"\n\n\
    [[section.package]]\n\
    pm = \"npm\"\n\
    id = \"pyright\"\n\
@@ -25,6 +26,7 @@ let parses () =
      | [ git; npm ] ->
        Alcotest.(check string) "first id" "Git.Git" git.value;
        Alcotest.(check bool) "first typ" true (git.typ = Winget);
+       Alcotest.(check string) "upstream" "git/git" git.upstream;
        Alcotest.(check string) "second id" "pyright" npm.value;
        Alcotest.(check string) "second pm" "npm" (type_string npm.typ);
        Alcotest.(check string) "second version" "1.2.3" npm.installed_version
@@ -68,7 +70,9 @@ let round_trip () =
   Alcotest.(check string) "winget path" r.winget_path r2.winget_path;
   Alcotest.(check int) "sections" (List.length r.sections) (List.length r2.sections);
   let ids secs = List.concat_map (fun s -> List.map (fun i -> i.value) s.items) secs in
-  Alcotest.(check (list string)) "ids" (ids r.sections) (ids r2.sections)
+  Alcotest.(check (list string)) "ids" (ids r.sections) (ids r2.sections);
+  let ups secs = List.concat_map (fun s -> List.map (fun i -> i.upstream) s.items) secs in
+  Alcotest.(check (list string)) "upstream survives" (ups r.sections) (ups r2.sections)
 ;;
 
 let () =

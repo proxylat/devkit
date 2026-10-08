@@ -90,9 +90,14 @@ let candidates (it : item) : string list =
     4. "Installed": the manifest items already at their latest version,
        trailing the table so the run ends on green.
     A manifest section literally named "winget" is dropped (it is a
-    leftover artifact, never real content). *)
+    leftover artifact, never real content).
+
+    Winget rows pinned to an [upstream] repo compare against the
+    vendor's release tag ([?upstream_ver]) instead of the community
+    Available column; a failed lookup keeps the winget reading. *)
 let build_sections
       ?(show : string -> string option = fun _ -> None)
+      ?(upstream_ver : string -> string option = fun _ -> None)
       ?(run : Proc.runner option = None)
       ?(os : string = Sys.os_type)
       (apps : app list)
@@ -218,6 +223,54 @@ let build_sections
          })
       pkgs_sections
   in
+  (* 2b. Upstream truth: winget rows pinned to an official repo
+     compare their installed version against the vendor's release tag
+     instead of trusting the community Available column. Each repo is
+     queried once, up to 8 in flight; a failed query keeps the winget
+     reading (offline fallback). NotFound rows skip the check: with
+     nothing installed there is nothing to compare. *)
+  let upstream_ids =
+    List.concat_map
+      (fun sec ->
+         List.filter_map
+           (fun it ->
+              if
+                it.typ = Winget
+                && it.upstream <> ""
+                && (it.status = Installed || it.status = NeedsUpdate)
+              then Some it.upstream
+              else None)
+           sec.items)
+      pkgs_sections
+    |> List.sort_uniq String.compare
+  in
+  let upstream_table : (string, string option) Hashtbl.t =
+    Hashtbl.create (max 1 (List.length upstream_ids))
+  in
+  List.iter2
+    (fun repo tag -> Hashtbl.replace upstream_table repo tag)
+    upstream_ids
+    (Proc.par_map8 upstream_ver upstream_ids);
+  let pkgs_sections =
+    List.map
+      (fun sec ->
+         { sec with
+           items =
+             List.map
+               (fun it ->
+                  if it.typ <> Winget || it.upstream = "" || it.installed_version = ""
+                  then it
+                  else (
+                    match Hashtbl.find_opt upstream_table it.upstream with
+                    | None | Some None -> it
+                    | Some (Some tag) ->
+                      if Strutil.is_newer_version it.installed_version tag
+                      then { it with available_version = tag; status = NeedsUpdate }
+                      else { it with available_version = ""; status = Installed }))
+               sec.items
+         })
+      pkgs_sections
+  in
   (* 3. Non-manifest installed apps with updates → pending updates. *)
   let value_in_manifest name =
     List.exists
@@ -246,6 +299,7 @@ let build_sections
                ; installed_version = inf.version
                ; available_version = inf.available
                ; status = NeedsUpdate
+               ; upstream = ""
                }
                :: !man_updates))
        ids);
@@ -311,6 +365,7 @@ let build_sections
                  ; installed_version = inf.version
                  ; available_version = avail
                  ; status = New
+                 ; upstream = ""
                  }
                  :: !new_items)))
        ids);

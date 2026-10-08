@@ -125,29 +125,30 @@ let install_winget (d : deps) (id : string) (update : bool) : outcome =
 
 let repo_page (repo : string) : string = "https://github.com/" ^ repo
 
-let install_github (d : deps) (repo : string) : outcome =
+let install_github (d : deps) ~(value : string) (repo : string) (update : bool) : outcome =
+  let done_status = if update then Updated else Installed in
   match d.latest_release repo with
   | Error _ ->
     (* API unreachable: fall back to opening the repo page, mirroring
        the no-asset fallback below, so a link-like row never dead-ends. *)
     (match d.open_browser (repo_page repo) with
-     | Ok () -> succeed repo Opened
-     | Error e -> fail repo e)
+     | Ok () -> succeed value Opened
+     | Error e -> fail value e)
   | Ok rel ->
     (match Gh.match_by_arch rel.Gh.assets with
      | None ->
        (* No Windows installer asset: open the release page instead. *)
        let page = repo_page repo ^ "/releases/latest" in
        (match d.open_browser page with
-        | Ok () -> succeed repo Opened
-        | Error e -> fail repo e)
+        | Ok () -> succeed value Opened
+        | Error e -> fail value e)
      | Some asset ->
        (match d.download ~url:asset.Gh.browser_download_url with
-        | Error e -> fail repo e
+        | Error e -> fail value e
         | Ok path ->
           (match d.run_installer path with
-           | Ok () -> succeed repo Installed
-           | Error e -> fail repo e)))
+           | Ok () -> succeed value done_status
+           | Error e -> fail value e)))
 ;;
 
 (** Install/update via a plugin tool's command template. Only [{id}]
@@ -170,11 +171,24 @@ let install_plugin (d : deps) (t : Plugin.tool) (id : string) (update : bool) : 
 (** Dispatch an install/update for one manifest entry. [kind] is one of
     ["winget"], ["github"], ["url"], a plugin tool name, or anything
     else (a skip). winget keeps its special path (already-installed
-    readings); its plugin entry only documents the equivalent command. *)
-let install (d : deps) (kind : string) (value : string) (update : bool) : outcome =
+    readings); its plugin entry only documents the equivalent command.
+    A non-empty [upstream] diverts winget rows to the vendor's GitHub
+    release instead of the community manifest; outcomes still carry
+    the winget id. *)
+let install
+      (d : deps)
+      ?(upstream : string = "")
+      (kind : string)
+      (value : string)
+      (update : bool)
+  : outcome
+  =
   match kind with
-  | "winget" -> install_winget d value update
-  | "github" -> install_github d value
+  | "winget" ->
+    if upstream <> ""
+    then install_github d ~value upstream update
+    else install_winget d value update
+  | "github" -> install_github d ~value value update
   | "url" ->
     (match d.open_browser value with
      | Ok () -> succeed value Opened

@@ -30,6 +30,7 @@ type env =
   { run : Proc.runner
   ; fs : fs
   ; bio : Bootstrap.io
+  ; fetch : Fetch.fetch
   }
 
 let lower s = String.lowercase_ascii s
@@ -89,6 +90,14 @@ let winget_show (bio : Bootstrap.io) (winget : string) (id : string) : string =
           else find rest
       in
       find lines))
+;;
+
+(** Vendor truth for [upstream] rows: [repo] → latest release tag.
+    [None] on any failure, so the merge keeps the winget reading. *)
+let upstream_ver_of_fetch (fetch : Fetch.fetch) (repo : string) : string option =
+  match Gh.latest_release fetch repo with
+  | Ok rel when rel.Gh.tag_name <> "" -> Some rel.Gh.tag_name
+  | _ -> None
 ;;
 
 type scan =
@@ -164,9 +173,16 @@ let default_view (e : env) ~(tools : Plugin.tool list) : string =
     let v = winget_show e.bio s.winget id in
     if v = "" then None else Some v
   in
+  let upstream_ver = upstream_ver_of_fetch e.fetch in
   let dash =
     timed "build" (fun () ->
-      build_sections ~show ~run:(Some e.run) (to_dashboard_apps s.apps) sections s.info)
+      build_sections
+        ~show
+        ~upstream_ver
+        ~run:(Some e.run)
+        (to_dashboard_apps s.apps)
+        sections
+        s.info)
   in
   let body = render dash in
   if s.apps <> []
@@ -194,10 +210,12 @@ let import_view (e : env) ?(tools : Plugin.tool list = []) (path : string)
       let v = winget_show e.bio s.winget id in
       if v = "" then None else Some v
     in
+    let upstream_ver = upstream_ver_of_fetch e.fetch in
     Ok
       (render
          (build_sections
             ~show
+            ~upstream_ver
             ~run:(Some e.run)
             (to_dashboard_apps s.apps)
             r.sections

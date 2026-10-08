@@ -108,7 +108,12 @@ let press_enter ~draw (deps : Install.deps) (st : Tui.state) : Tui.state Lwt.t =
       (Tui.apply_outcome
          st
          item.Manifest.value
-         (Install.install deps (kind_of item.Manifest.typ) item.Manifest.value update))
+         (Install.install
+            deps
+            ~upstream:item.Manifest.upstream
+            (kind_of item.Manifest.typ)
+            item.Manifest.value
+            update))
   | Tui.Do_open (item, url) ->
     (match deps.Install.open_browser url with
      | Ok () ->
@@ -176,9 +181,11 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
       | "" -> None
       | v -> Some v
     in
+    let upstream_ver = App.upstream_ver_of_fetch env.App.fetch in
     let dash =
       Dashboard.build_sections
         ~show
+        ~upstream_ver
         ~run:(Some env.App.run)
         s.App.apps
         sections

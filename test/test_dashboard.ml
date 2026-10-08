@@ -260,6 +260,92 @@ let path_probe_miss () =
   | _ -> Alcotest.fail "PATH miss should stay Manual"
 ;;
 
+let version_order () =
+  let newer = Strutil.is_newer_version in
+  let cases =
+    [ "2.47.1", "v2.48.0", true
+    ; "2.48.0", "v2.48.0", false
+    ; "2.48", "2.48.0", false
+    ; "2.48.0", "2.48", false
+    ; "1.0", "1.0-beta", false
+    ; "1.0-beta", "1.0", true
+    ; "1.9", "1.10", true
+    ; "2.48.1", "2.48", false
+    ]
+  in
+  List.iter
+    (fun (inst, latest, want) ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s vs %s" inst latest)
+         want
+         (newer inst latest))
+    cases
+;;
+
+let upstream_truth () =
+  (* The vendor tag overrides the community Available column in both
+     directions; rows without upstream keep winget behavior. *)
+  let manifest =
+    [ { name = "Tools"
+      ; items =
+          [ { (item Winget "Git.Git") with upstream = "git/git" }
+          ; { (item Winget "Brave.Brave") with upstream = "brave/brave" }
+          ; item Winget "Plain.App"
+          ]
+      }
+    ]
+  in
+  let info =
+    winget_info
+      [ "Git.Git", "Git", "2.47.1", ""
+      ; "Brave.Brave", "Brave", "1.80", "2.0"
+      ; "Plain.App", "Plain", "2.0", "3.0"
+      ]
+  in
+  let upstream_ver = function
+    | "git/git" -> Some "v9.9"
+    | "brave/brave" -> Some "v1.80"
+    | _ -> None
+  in
+  let sections = Dashboard.build_sections ~upstream_ver [] manifest (Some info) in
+  Alcotest.(check int) "pending + installed" 2 (List.length sections);
+  let pending = List.nth sections 0 in
+  Alcotest.(check string) "pending first" "Pending updates" pending.name;
+  Alcotest.(check int) "two updates" 2 (List.length pending.items);
+  let git = List.nth pending.items 0 in
+  Alcotest.(check string) "tag wins over silence" "v9.9" git.available_version;
+  (match git.status with
+   | NeedsUpdate -> ()
+   | _ -> Alcotest.fail "git should need update");
+  let plain = List.nth pending.items 1 in
+  Alcotest.(check string) "winget control" "3.0" plain.available_version;
+  let done_ = List.nth sections 1 in
+  Alcotest.(check string) "installed last" "Installed" done_.name;
+  let brave = List.nth done_.items 0 in
+  Alcotest.(check string) "tag clears winget noise" "" brave.available_version;
+  match brave.status with
+  | Installed -> ()
+  | _ -> Alcotest.fail "brave should be Installed"
+;;
+
+let upstream_offline_keeps_winget () =
+  (* API failure keeps the winget reading instead of hiding the update. *)
+  let manifest =
+    [ { name = "Tools"
+      ; items = [ { (item Winget "Git.Git") with upstream = "git/git" } ]
+      }
+    ]
+  in
+  let info = winget_info [ "Git.Git", "Git", "2.47.1", "2.48.0" ] in
+  let sections =
+    Dashboard.build_sections ~upstream_ver:(fun _ -> None) [] manifest (Some info)
+  in
+  let pending = List.nth sections 0 in
+  Alcotest.(check string) "pending first" "Pending updates" pending.name;
+  let git = List.nth pending.items 0 in
+  Alcotest.(check string) "winget available kept" "2.48.0" git.available_version
+;;
+
 let () =
   Alcotest.run
     "dashboard"
@@ -270,6 +356,12 @@ let () =
         ; Alcotest.test_case "show fallback many" `Quick show_fallback_many
         ; Alcotest.test_case "basename match" `Quick basename_match
         ; Alcotest.test_case "installed last" `Quick installed_last
+        ; Alcotest.test_case "version order" `Quick version_order
+        ; Alcotest.test_case "upstream truth" `Quick upstream_truth
+        ; Alcotest.test_case
+            "upstream offline keeps winget"
+            `Quick
+            upstream_offline_keeps_winget
         ; Alcotest.test_case "url stem match" `Quick url_stem_match
         ; Alcotest.test_case "PATH probe rescue" `Quick path_probe_rescue
         ; Alcotest.test_case "PATH probe miss" `Quick path_probe_miss

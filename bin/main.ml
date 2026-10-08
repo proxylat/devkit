@@ -40,7 +40,7 @@ let real_fs : App.fs =
 
 let make_env () : App.env =
   let fetch = Fetch.curl_fetch Proc.default_runner in
-  { run = Proc.default_runner; fs = real_fs; bio = Bootstrap.real_io fetch }
+  { run = Proc.default_runner; fs = real_fs; bio = Bootstrap.real_io fetch; fetch }
 ;;
 
 (** Custom tools from [tools.sexp] (cwd) + config dir. A broken file

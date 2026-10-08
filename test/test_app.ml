@@ -42,7 +42,11 @@ let scan_run prog _args =
   | _ -> None
 ;;
 
-let env files = { App.run = scan_run; fs = mem_fs files; bio = fake_bio () }
+let offline_fetch ?timeout_s:_ _ _ = Error "offline"
+
+let env files =
+  { App.run = scan_run; fs = mem_fs files; bio = fake_bio (); fetch = offline_fetch }
+;;
 
 let contains sub s =
   try
@@ -82,12 +86,14 @@ let append_groups () =
       ; installed_version = ""
       ; available_version = ""
       ; status = Manifest.New
+      ; upstream = ""
       }
     ; { Manifest.typ = Manifest.Winget
       ; value = "Git.Git"
       ; installed_version = ""
       ; available_version = ""
       ; status = Manifest.New
+      ; upstream = ""
       }
     ]
   in
@@ -233,6 +239,7 @@ let new_items () =
     ; installed_version = ""
     ; available_version = ""
     ; status
+    ; upstream = ""
     }
   in
   let secs =
@@ -266,6 +273,31 @@ let default () =
   Alcotest.(check bool) "mentions app" true (contains "Git.Git" s)
 ;;
 
+let default_upstream () =
+  (* End to end: the vendor tag (equal to installed) overrules winget's
+     Available column, so the row lands green instead of pending. *)
+  let files = Hashtbl.create 1 in
+  Hashtbl.add
+    files
+    Manifest.filename
+    "[[section]]\n\
+     name = \"tools\"\n\n\
+     [[section.package]]\n\
+     pm = \"winget\"\n\
+     id = \"Git.Git\"\n\
+     upstream = \"git/git\"\n";
+  let fetch ?timeout_s:_ url _ =
+    if Strutil.contains_substring "api.github.com" url
+    then Ok {|{"tag_name": "v2.47.1", "assets": []}|}
+    else Error "unexpected url"
+  in
+  let e = { (env files) with fetch } in
+  let s = App.default_view ~tools:[] e in
+  Alcotest.(check bool) "green row" true (contains "[✓] Git.Git 2.47.1" s);
+  Alcotest.(check bool) "installed section" true (contains "INSTALLED" s);
+  Alcotest.(check bool) "no pending" false (contains "PENDING" s)
+;;
+
 let scan_error () =
   let s = App.scan (env (Hashtbl.create 1)) ~override_path:"" ~extra:[] in
   Alcotest.(check string) "no winget" "" s.App.winget;
@@ -274,7 +306,11 @@ let scan_error () =
 
 let default_empty () =
   let e =
-    { App.run = (fun _ _ -> None); fs = mem_fs (Hashtbl.create 1); bio = fake_bio () }
+    { App.run = (fun _ _ -> None)
+    ; fs = mem_fs (Hashtbl.create 1)
+    ; bio = fake_bio ()
+    ; fetch = offline_fetch
+    }
   in
   let s = App.default_view ~tools:[] e in
   Alcotest.(check bool) "names winget" true (contains "winget" s)
@@ -302,6 +338,7 @@ let () =
         ; Alcotest.test_case "export_except" `Quick export_except
         ; Alcotest.test_case "show" `Quick show
         ; Alcotest.test_case "default" `Quick default
+        ; Alcotest.test_case "default upstream" `Quick default_upstream
         ; Alcotest.test_case "scan error" `Quick scan_error
         ; Alcotest.test_case "default empty" `Quick default_empty
         ] )

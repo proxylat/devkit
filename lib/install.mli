@@ -35,5 +35,9 @@ val repo_page : string -> string
 val run_installer : Bootstrap.spawn -> string -> (unit, string) result
 
 val real_open_browser : ?os:string -> Bootstrap.spawn -> string -> (unit, string) result
-val install : deps -> string -> string -> bool -> outcome
+
+(** Dispatch an install/update for one manifest entry. A non-empty
+    [upstream] diverts winget rows to the vendor's GitHub release. *)
+val install : deps -> ?upstream:string -> string -> string -> bool -> outcome
+
 val real_deps : Fetch.fetch -> winget_override:string -> unit -> deps

@@ -6,6 +6,7 @@ let item status value =
   ; installed_version = "1.0"
   ; available_version = ""
   ; status
+  ; upstream = ""
   }
 ;;
 
@@ -63,7 +64,13 @@ let enter_mapping () =
 ;;
 
 let litem typ status value =
-  { Manifest.typ; value; installed_version = "1.0"; available_version = ""; status }
+  { Manifest.typ
+  ; value
+  ; installed_version = "1.0"
+  ; available_version = ""
+  ; status
+  ; upstream = ""
+  }
 ;;
 
 let enter_opens_links () =

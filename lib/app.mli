@@ -12,6 +12,7 @@ type env =
   { run : Proc.runner
   ; fs : fs
   ; bio : Bootstrap.io
+  ; fetch : Fetch.fetch
   }
 
 type scan =
@@ -25,6 +26,11 @@ type scan =
 val load_manifest : fs -> string -> Manifest.section list * string
 
 val winget_show : Bootstrap.io -> string -> string -> string
+
+(** Vendor truth for [upstream] rows: [repo] → latest release tag
+    ([None] on any failure). *)
+val upstream_ver_of_fetch : Fetch.fetch -> string -> string option
+
 val scan : env -> override_path:string -> extra:Plugin.tool list -> scan
 val default_view : env -> tools:Plugin.tool list -> string
 val import_view : env -> ?tools:Plugin.tool list -> string -> (string, string) result

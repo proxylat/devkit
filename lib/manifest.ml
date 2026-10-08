@@ -2,7 +2,10 @@
 
     The manifest is TOML: an optional top-level [winget_path] plus a
     [[section]] array, each section holding a [name] and a [package]
-    array of [{ pm, id }] tables with optional version fields. Parsing
+    array of [{ pm, id }] tables with optional version fields. A winget
+    package may also carry [upstream = "owner/repo"]: version truth and
+    downloads then come from the vendor's GitHub releases instead of the
+    community winget manifest. Parsing
     is total: malformed TOML yields an empty result, unknown package
     managers and items without an id are skipped. Statuses are never
     persisted; they are assigned at runtime by the merge step. *)
@@ -28,6 +31,7 @@ type item =
   ; installed_version : string
   ; available_version : string
   ; status : status
+  ; upstream : string
   }
 
 type section =
@@ -45,6 +49,7 @@ let make_item typ value =
   ; value
   ; installed_version = ""
   ; available_version = ""
+  ; upstream = ""
   ; (* Fresh items carry [NotFound]; statuses are assigned later by the
        merge step. *)
     status = NotFound
@@ -105,6 +110,7 @@ let parse (text : string) : parse_result =
                             { (make_item typ id) with
                               installed_version = get_str pkg "installed_version"
                             ; available_version = get_str pkg "available_version"
+                            ; upstream = get_str pkg "upstream"
                             }
                         | _ -> None)
                      pkgs
@@ -122,6 +128,7 @@ let to_string (r : parse_result) : string =
   let pkg it =
     Toml.Min.of_key_values
       ([ str "pm" (type_string it.typ); str "id" it.value ]
+       @ (if it.upstream <> "" then [ str "upstream" it.upstream ] else [])
        @ (if it.installed_version <> ""
           then [ str "installed_version" it.installed_version ]
           else [])

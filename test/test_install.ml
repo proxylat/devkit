@@ -128,6 +128,43 @@ let win_asset =
 
 let win_release = { Gh.tag_name = "v1"; assets = win_asset :: [] }
 
+let test_winget_upstream_install () =
+  (* Upstream rows download the vendor asset; winget never spawns, and
+     the outcome still carries the winget id for row matching. *)
+  let spawned = ref false in
+  let got_url = ref "" in
+  let d =
+    base_deps
+      ~spawn:(fun _ _ ->
+        spawned := true;
+        "", true)
+      ~latest:(fun repo ->
+        Alcotest.(check string) "repo" "owner/tool" repo;
+        Ok win_release)
+      ~download:(fun ~url ->
+        got_url := url;
+        Ok "/tmp/tool.exe")
+      ()
+  in
+  let r = Install.install ~upstream:"owner/tool" d "winget" "Foo.Bar" false in
+  Alcotest.(check bool) "winget never spawned" false !spawned;
+  Alcotest.(check string) "asset url" "https://x/tool.exe" !got_url;
+  Alcotest.(check string) "winget id kept" "Foo.Bar" r.Install.value;
+  Alcotest.(check bool) "installed" true (r.Install.status = Install.Installed)
+;;
+
+let test_winget_upstream_update () =
+  let d =
+    base_deps
+      ~latest:(fun _ -> Ok win_release)
+      ~download:(fun ~url:_ -> Ok "/tmp/tool.exe")
+      ()
+  in
+  let r = Install.install ~upstream:"owner/tool" d "winget" "Foo.Bar" true in
+  Alcotest.(check string) "winget id kept" "Foo.Bar" r.Install.value;
+  Alcotest.(check bool) "updated" true (r.Install.status = Install.Updated)
+;;
+
 let test_github_happy () =
   let got_url = ref "" in
   let got_path = ref "" in
@@ -345,6 +382,8 @@ let () =
         ; Alcotest.test_case "already installed" `Quick test_winget_already_installed
         ; Alcotest.test_case "no newer on update" `Quick test_winget_no_newer_update
         ; Alcotest.test_case "real error" `Quick test_winget_real_error
+        ; Alcotest.test_case "upstream install" `Quick test_winget_upstream_install
+        ; Alcotest.test_case "upstream update" `Quick test_winget_upstream_update
         ] )
     ; ( "github"
       , [ Alcotest.test_case "happy path" `Quick test_github_happy

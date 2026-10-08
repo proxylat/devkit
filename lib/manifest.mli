@@ -22,6 +22,7 @@ type item =
   ; installed_version : string
   ; available_version : string
   ; status : status
+  ; upstream : string
   }
 
 type section =

@@ -16,10 +16,15 @@ val format_ver : Manifest.item -> string
     [winget show]. [run] enables a single-spawn PATH probe: manifest
     items whose candidate command is on PATH (but missed by every PM
     scan) count as installed. [os] selects the probe shell (default:
-    [Sys.os_type]) so tests stay platform-independent. Matching is candidate-based (full value,
+    [Sys.os_type]) so tests stay platform-independent. [upstream_ver]
+    maps an [upstream] repo to its latest release tag: winget rows pinned
+    to an official repo compare against the vendor tag instead of the
+    community Available column, and a failed lookup keeps the winget
+    reading. Matching is candidate-based (full value,
     basename, URL stem), not exact-id. *)
 val build_sections
   :  ?show:(string -> string option)
+  -> ?upstream_ver:(string -> string option)
   -> ?run:Proc.runner option
   -> ?os:string
   -> app list
