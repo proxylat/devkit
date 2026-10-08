@@ -22,7 +22,7 @@ type item =
   ; installed_version : string
   ; available_version : string
   ; status : status
-  ; upstream : string
+  ; upstream : string (** [owner/repo] or a full GitHub URL; "" disables *)
   }
 
 type section =

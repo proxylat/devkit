@@ -123,7 +123,7 @@ let install_winget (d : deps) (id : string) (update : bool) : outcome =
     else fail id ("winget " ^ String.concat " " args ^ " failed: " ^ String.trim out))
 ;;
 
-let repo_page (repo : string) : string = "https://github.com/" ^ repo
+let repo_page (repo : string) : string = "https://github.com/" ^ Gh.canon_repo repo
 
 let install_github (d : deps) ~(value : string) (repo : string) (update : bool) : outcome =
   let done_status = if update then Updated else Installed in

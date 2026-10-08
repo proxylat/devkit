@@ -275,7 +275,8 @@ let default () =
 
 let default_upstream () =
   (* End to end: the vendor tag (equal to installed) overrules winget's
-     Available column, so the row lands green instead of pending. *)
+     Available column, so the row lands green instead of pending. The pin
+     is a full GitHub URL; the API request still hits the canonical path. *)
   let files = Hashtbl.create 1 in
   Hashtbl.add
     files
@@ -285,9 +286,9 @@ let default_upstream () =
      [[section.package]]\n\
      pm = \"winget\"\n\
      id = \"Git.Git\"\n\
-     upstream = \"git/git\"\n";
+     upstream = \"https://github.com/git/git\"\n";
   let fetch ?timeout_s:_ url _ =
-    if Strutil.contains_substring "api.github.com" url
+    if Strutil.contains_substring "api.github.com/repos/git/git/releases/latest" url
     then Ok {|{"tag_name": "v2.47.1", "assets": []}|}
     else Error "unexpected url"
   in
