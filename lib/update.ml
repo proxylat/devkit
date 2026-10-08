@@ -121,19 +121,40 @@ let cargo_updates (fetch : Fetch.fetch) (versions : (string * string) list)
     versions
 ;;
 
+(** Pinned rows answer to the vendor tag, whatever their PM: compare
+    the installed version against the latest release tag, up to 8 in
+    flight. Unpinned, versionless, non-Installed, failed, and current
+    rows yield no update. *)
+let upstream_updates (fetch : Fetch.fetch) (items : item list) : (string * string) list =
+  let one (it : item) =
+    if it.upstream = "" || it.installed_version = "" || it.status <> Installed
+    then None
+    else (
+      match Gh.latest_release fetch it.upstream with
+      | Error _ -> None
+      | Ok rel ->
+        if Strutil.is_newer_version it.installed_version rel.Gh.tag_name
+        then Some (it.value, rel.Gh.tag_name)
+        else None)
+  in
+  List.filter_map Fun.id (Proc.par_map8 one items)
+;;
+
 (** Group Installed Pm items by manager: npm via [outdated], pipx and
-    uv via PyPI, cargo via crates.io. Anything else (winget, links,
-    unknown Pms, non-Installed rows) is ignored. *)
+    uv via PyPI, cargo via crates.io. Pinned rows of any kind check
+    the vendor tag instead of their registry. Anything else (winget,
+    links, unknown Pms, non-Installed rows) is ignored. *)
 let check_all ~(run : Proc.runner) ~(fetch : Fetch.fetch) (items : item list)
   : (string * string) list
   =
+  let pinned, rest = List.partition (fun it -> it.upstream <> "") items in
   let installed =
     List.filter_map
       (fun it ->
          match it.typ with
          | Pm pm when it.status = Installed -> Some (pm, it.value, it.installed_version)
          | _ -> None)
-      items
+      rest
   in
   let has pm = List.exists (fun (p, _, _) -> p = pm) installed in
   let of_pm pm =
@@ -142,5 +163,6 @@ let check_all ~(run : Proc.runner) ~(fetch : Fetch.fetch) (items : item list)
   let npm = if has "npm" then npm_updates run else [] in
   let pypi = pypi_updates fetch (of_pm "pipx" @ of_pm "uv") in
   let cargo = cargo_updates fetch (of_pm "cargo") in
-  List.sort_uniq compare (npm @ pypi @ cargo)
+  let pinned = upstream_updates fetch pinned in
+  List.sort_uniq compare (npm @ pypi @ cargo @ pinned)
 ;;

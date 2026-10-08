@@ -165,6 +165,41 @@ let test_winget_upstream_update () =
   Alcotest.(check bool) "updated" true (r.Install.status = Install.Updated)
 ;;
 
+let test_pm_upstream_update () =
+  (* Pinned plugin rows take the vendor asset path; no PM command
+     spawns, and the outcome keeps the manifest value for matching. *)
+  let spawned = ref false in
+  let d =
+    base_deps
+      ~spawn:(fun _ _ ->
+        spawned := true;
+        "", true)
+      ~latest:(fun repo ->
+        Alcotest.(check string) "repo" "owner/tool" repo;
+        Ok win_release)
+      ~download:(fun ~url:_ -> Ok "/tmp/tool.exe")
+      ()
+  in
+  let r = Install.install ~upstream:"owner/tool" d "npm" "some-tool" true in
+  Alcotest.(check bool) "pm never spawned" false !spawned;
+  Alcotest.(check string) "value kept" "some-tool" r.Install.value;
+  Alcotest.(check bool) "updated" true (r.Install.status = Install.Updated)
+;;
+
+let test_github_upstream_override () =
+  let d =
+    base_deps
+      ~latest:(fun repo ->
+        Alcotest.(check string) "repo" "other/repo" repo;
+        Ok win_release)
+      ~download:(fun ~url:_ -> Ok "/tmp/tool.exe")
+      ()
+  in
+  let r = Install.install ~upstream:"other/repo" d "github" "owner/tool" true in
+  Alcotest.(check string) "value kept" "owner/tool" r.Install.value;
+  Alcotest.(check bool) "updated" true (r.Install.status = Install.Updated)
+;;
+
 let test_github_happy () =
   let got_url = ref "" in
   let got_path = ref "" in
@@ -384,6 +419,11 @@ let () =
         ; Alcotest.test_case "real error" `Quick test_winget_real_error
         ; Alcotest.test_case "upstream install" `Quick test_winget_upstream_install
         ; Alcotest.test_case "upstream update" `Quick test_winget_upstream_update
+        ; Alcotest.test_case "pm upstream update" `Quick test_pm_upstream_update
+        ; Alcotest.test_case
+            "github upstream override"
+            `Quick
+            test_github_upstream_override
         ] )
     ; ( "github"
       , [ Alcotest.test_case "happy path" `Quick test_github_happy

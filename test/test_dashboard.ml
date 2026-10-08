@@ -346,6 +346,46 @@ let upstream_offline_keeps_winget () =
   Alcotest.(check string) "winget available kept" "2.48.0" git.available_version
 ;;
 
+let upstream_all_pms () =
+  (* Pinned npm rows answer to the vendor tag: tag newer → Pending
+     updates; tag equal → trailing Installed with no noise. *)
+  let manifest =
+    [ { name = "Tools"
+      ; items =
+          [ { (item (Pm "npm") "typescript") with upstream = "microsoft/TypeScript" }
+          ; { (item (Pm "npm") "prettier") with upstream = "prettier/prettier" }
+          ]
+      }
+    ]
+  in
+  let apps =
+    [ Dashboard.{ name = "typescript"; version = "5.3.3"; pm = "npm" }
+    ; Dashboard.{ name = "prettier"; version = "3.1.0"; pm = "npm" }
+    ]
+  in
+  let upstream_ver = function
+    | "microsoft/TypeScript" -> Some "v5.9.2"
+    | "prettier/prettier" -> Some "v3.1.0"
+    | _ -> None
+  in
+  let sections = Dashboard.build_sections ~upstream_ver apps manifest None in
+  Alcotest.(check int) "pending + installed" 2 (List.length sections);
+  let pending = List.nth sections 0 in
+  Alcotest.(check string) "pending first" "Pending updates" pending.name;
+  let ts = List.nth pending.items 0 in
+  Alcotest.(check string) "tag wins" "v5.9.2" ts.available_version;
+  (match ts.status with
+   | NeedsUpdate -> ()
+   | _ -> Alcotest.fail "typescript should need update");
+  let done_ = List.nth sections 1 in
+  Alcotest.(check string) "installed last" "Installed" done_.name;
+  let pretty = List.nth done_.items 0 in
+  Alcotest.(check string) "no noise" "" pretty.available_version;
+  match pretty.status with
+  | Installed -> ()
+  | _ -> Alcotest.fail "prettier should be Installed"
+;;
+
 let () =
   Alcotest.run
     "dashboard"
@@ -362,6 +402,7 @@ let () =
             "upstream offline keeps winget"
             `Quick
             upstream_offline_keeps_winget
+        ; Alcotest.test_case "upstream all pms" `Quick upstream_all_pms
         ; Alcotest.test_case "url stem match" `Quick url_stem_match
         ; Alcotest.test_case "PATH probe rescue" `Quick path_probe_rescue
         ; Alcotest.test_case "PATH probe miss" `Quick path_probe_miss

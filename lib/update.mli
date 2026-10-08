@@ -11,8 +11,13 @@ val pypi_updates : Fetch.fetch -> (string * string) list -> (string * string) li
 (** crates.io max_version per package, same skip rules as PyPI. *)
 val cargo_updates : Fetch.fetch -> (string * string) list -> (string * string) list
 
-(** Group Installed Pm items by manager and check each group; returns
-    [(value, available)] sorted and deduplicated. *)
+(** Pinned rows (any kind) against their vendor release tag; returns
+    [(value, tag)] for rows the tag leaves behind. *)
+val upstream_updates : Fetch.fetch -> Manifest.item list -> (string * string) list
+
+(** Group Installed Pm items by manager and check each group; pinned
+    rows check the vendor tag instead. Returns [(value, available)]
+    sorted and deduplicated. *)
 val check_all
   :  run:Proc.runner
   -> fetch:Fetch.fetch

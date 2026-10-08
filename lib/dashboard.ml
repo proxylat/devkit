@@ -92,9 +92,9 @@ let candidates (it : item) : string list =
     A manifest section literally named "winget" is dropped (it is a
     leftover artifact, never real content).
 
-    Winget rows pinned to an [upstream] repo compare against the
-    vendor's release tag ([?upstream_ver]) instead of the community
-    Available column; a failed lookup keeps the winget reading. *)
+    Rows of any kind pinned to an [upstream] repo compare against the
+    vendor's release tag ([?upstream_ver]) instead of their PM's
+    reading; a failed lookup keeps the PM reading. *)
 let build_sections
       ?(show : string -> string option = fun _ -> None)
       ?(upstream_ver : string -> string option = fun _ -> None)
@@ -223,21 +223,18 @@ let build_sections
          })
       pkgs_sections
   in
-  (* 2b. Upstream truth: winget rows pinned to an official repo
+  (* 2b. Upstream truth: rows of any kind pinned to an official repo
      compare their installed version against the vendor's release tag
-     instead of trusting the community Available column. Each repo is
-     queried once, up to 8 in flight; a failed query keeps the winget
-     reading (offline fallback). NotFound rows skip the check: with
+     instead of trusting their PM's reading. Each repo is queried once,
+     up to 8 in flight; a failed query keeps the PM reading (offline
+     fallback). Rows without an installed version skip the check: with
      nothing installed there is nothing to compare. *)
   let upstream_ids =
     List.concat_map
       (fun sec ->
          List.filter_map
            (fun it ->
-              if
-                it.typ = Winget
-                && it.upstream <> ""
-                && (it.status = Installed || it.status = NeedsUpdate)
+              if it.upstream <> "" && (it.status = Installed || it.status = NeedsUpdate)
               then Some it.upstream
               else None)
            sec.items)
@@ -258,7 +255,7 @@ let build_sections
            items =
              List.map
                (fun it ->
-                  if it.typ <> Winget || it.upstream = "" || it.installed_version = ""
+                  if it.upstream = "" || it.installed_version = ""
                   then it
                   else (
                     match Hashtbl.find_opt upstream_table it.upstream with

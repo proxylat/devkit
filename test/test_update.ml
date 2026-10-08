@@ -155,6 +155,54 @@ let apply_updates_empty () =
   Alcotest.(check (option string)) "message" (Some "everything up to date") st.Tui.message
 ;;
 
+let pin value upstream version status =
+  { (make_item (Pm "npm") value) with upstream; installed_version = version; status }
+;;
+
+let upstream_newer_current_fail () =
+  let fetch ?timeout_s:_ url _ =
+    if Strutil.contains_substring "repos/new/tool" url
+    then Ok {|{"tag_name": "v2.0", "assets": []}|}
+    else if Strutil.contains_substring "repos/same/tool" url
+    then Ok {|{"tag_name": "v1.0", "assets": []}|}
+    else Error "404"
+  in
+  let items =
+    [ pin "a" "new/tool" "1.0" Installed
+    ; pin "b" "same/tool" "1.0" Installed
+    ; pin "c" "gone/tool" "1.0" Installed
+    ; pin "d" "new/tool" "" Installed
+    ; pin "e" "new/tool" "1.0" Manual
+    ; pin "f" "" "1.0" Installed
+    ]
+  in
+  Alcotest.(check (list (pair string string)))
+    "only the behind row"
+    [ "a", "v2.0" ]
+    (Update.upstream_updates fetch items)
+;;
+
+let check_all_pins_skip_registry () =
+  (* A pinned npm row hits the GitHub API, never npm outdated. *)
+  let run _ _ = Alcotest.fail "registry must not run for pinned rows" in
+  let urls = ref [] in
+  let fetch ?timeout_s:_ url _ =
+    urls := url :: !urls;
+    Ok {|{"tag_name": "v9.9", "assets": []}|}
+  in
+  let items =
+    [ { (inst "npm" "typescript" "5.3.3") with upstream = "microsoft/TypeScript" } ]
+  in
+  let got = Update.check_all ~run ~fetch items in
+  Alcotest.(check (list (pair string string))) "tag update" [ "typescript", "v9.9" ] got;
+  Alcotest.(check bool)
+    "github api hit"
+    true
+    (List.exists
+       (fun u -> Strutil.contains_substring "api.github.com/repos/microsoft/TypeScript" u)
+       !urls)
+;;
+
 let () =
   Alcotest.run
     "update"
@@ -168,6 +216,13 @@ let () =
         ; Alcotest.test_case "pypi current/missing" `Quick pypi_current_and_missing
         ; Alcotest.test_case "cargo newer + UA" `Quick cargo_newer_and_ua
         ; Alcotest.test_case "check_all routes" `Quick check_all_routes
+        ] )
+    ; ( "upstream"
+      , [ Alcotest.test_case "newer/current/fail" `Quick upstream_newer_current_fail
+        ; Alcotest.test_case
+            "check_all skips registry"
+            `Quick
+            check_all_pins_skip_registry
         ] )
     ; ( "tui"
       , [ Alcotest.test_case "apply marks" `Quick apply_updates_marks

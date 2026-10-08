@@ -172,9 +172,9 @@ let install_plugin (d : deps) (t : Plugin.tool) (id : string) (update : bool) : 
     ["winget"], ["github"], ["url"], a plugin tool name, or anything
     else (a skip). winget keeps its special path (already-installed
     readings); its plugin entry only documents the equivalent command.
-    A non-empty [upstream] diverts winget rows to the vendor's GitHub
-    release instead of the community manifest; outcomes still carry
-    the winget id. *)
+    A non-empty [upstream] diverts winget, github, and plugin rows to
+    the vendor's GitHub release instead of their PM; outcomes still
+    carry the manifest value. Url rows always open the page. *)
 let install
       (d : deps)
       ?(upstream : string = "")
@@ -188,15 +188,19 @@ let install
     if upstream <> ""
     then install_github d ~value upstream update
     else install_winget d value update
-  | "github" -> install_github d ~value value update
+  | "github" ->
+    install_github d ~value (if upstream <> "" then upstream else value) update
   | "url" ->
     (match d.open_browser value with
      | Ok () -> succeed value Opened
      | Error e -> fail value e)
   | other ->
-    (match Plugin.find other d.tools with
-     | None -> { value; status = Skipped ("unsupported type \"" ^ other ^ "\"") }
-     | Some t -> install_plugin d t value update)
+    if upstream <> ""
+    then install_github d ~value upstream update
+    else (
+      match Plugin.find other d.tools with
+      | None -> { value; status = Skipped ("unsupported type \"" ^ other ^ "\"") }
+      | Some t -> install_plugin d t value update)
 ;;
 
 (** Production wiring: resolve winget via {!Bootstrap} (empty string when
