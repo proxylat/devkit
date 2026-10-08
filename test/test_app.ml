@@ -71,7 +71,6 @@ let load_parses () =
      [[section]]\n\
      name = \"tools\"\n\n\
      [[section.package]]\n\
-     pm = \"winget\"\n\
      id = \"Git.Git\"\n";
   let s, w = App.load_manifest (mem_fs files) Manifest.filename in
   Alcotest.(check string) "winget path" "C:\\w\\winget.exe" w;
@@ -123,11 +122,7 @@ let add () =
   Hashtbl.add
     files
     Manifest.filename
-    "[[section]]\n\
-     name = \"tools\"\n\n\
-     [[section.package]]\n\
-     pm = \"winget\"\n\
-     id = \"Git.Git\"\n";
+    "[[section]]\nname = \"tools\"\n\n[[section.package]]\nid = \"Git.Git\"\n";
   let msgs = App.run_add (env files) [ "Git.Git"; "Nope.Nope"; "Brave.Brave" ] in
   Alcotest.(check (list string))
     "messages"
@@ -264,11 +259,7 @@ let default () =
   Hashtbl.add
     files
     Manifest.filename
-    "[[section]]\n\
-     name = \"tools\"\n\n\
-     [[section.package]]\n\
-     pm = \"winget\"\n\
-     id = \"Git.Git\"\n";
+    "[[section]]\nname = \"tools\"\n\n[[section.package]]\nid = \"Git.Git\"\n";
   let s = App.default_view ~tools:[] (env files) in
   Alcotest.(check bool) "mentions app" true (contains "Git.Git" s)
 ;;
@@ -284,7 +275,6 @@ let default_upstream () =
     "[[section]]\n\
      name = \"tools\"\n\n\
      [[section.package]]\n\
-     pm = \"winget\"\n\
      id = \"Git.Git\"\n\
      upstream = \"https://github.com/git/git\"\n";
   let fetch ?timeout_s:_ url _ =

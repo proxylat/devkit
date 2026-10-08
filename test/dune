@@ -59,3 +59,7 @@
 (test
  (name test_proc)
  (libraries devkit alcotest unix))
+
+(test
+ (name test_strutil)
+ (libraries devkit alcotest))

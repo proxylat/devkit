@@ -35,12 +35,14 @@ type env =
 
 let lower s = String.lowercase_ascii s
 
-(** Missing/unparseable file yields empty sections. *)
+(** Missing/unparseable file yields empty sections. Skipped rows are
+    reported on stderr, so a typo'd id never vanishes silently. *)
 let load_manifest (fs : fs) (path : string) : section list * string =
   match fs.read_file path with
   | None -> [], ""
   | Some text ->
     let r = Manifest.parse text in
+    List.iter (fun w -> prerr_endline ("devkit: warning: " ^ w)) r.warnings;
     r.sections, r.winget_path
 ;;
 
@@ -205,6 +207,7 @@ let import_view (e : env) ?(tools : Plugin.tool list = []) (path : string)
   | None -> Error ("open: " ^ path)
   | Some text ->
     let r = Manifest.parse text in
+    List.iter (fun w -> prerr_endline ("devkit: warning: " ^ w)) r.warnings;
     let s = scan e ~override_path:r.winget_path ~extra:tools in
     let show id =
       let v = winget_show e.bio s.winget id in
@@ -238,6 +241,7 @@ let append_selected (fs : fs) (path : string) (items : item list) : (unit, strin
       ^ Manifest.to_string
           { sections = [ { name = "Newly detected"; items = ordered } ]
           ; winget_path = ""
+          ; warnings = []
           }
     in
     fs.append_file path text)
@@ -415,7 +419,11 @@ let run_export
                })
         (order_for tools)
     in
-    match e.fs.write_file output (Manifest.to_string { sections; winget_path = "" }) with
+    match
+      e.fs.write_file
+        output
+        (Manifest.to_string { sections; winget_path = ""; warnings = [] })
+    with
     | Error e -> [ "  error: " ^ e ]
     | Ok () ->
       let json_path = json_sibling output in

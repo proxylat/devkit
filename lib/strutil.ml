@@ -63,3 +63,49 @@ let is_newer_version (installed : string) (latest : string) : bool =
   in
   go (norm installed) (norm latest)
 ;;
+
+(** [canon_repo] accepts a bare [owner/repo] or a full GitHub URL — repo
+    page, deep link, or clone URL — and returns the canonical [owner/repo].
+    Anything unrecognized is returned unchanged. *)
+let canon_repo (s : string) : string =
+  let s = String.trim s in
+  let drop n str = String.sub str n (String.length str - n) in
+  let chop p str =
+    let low = String.lowercase_ascii str in
+    let n = String.length p in
+    if String.length str >= n && String.sub low 0 n = p then Some (drop n str) else None
+  in
+  let strip_git r =
+    let low = String.lowercase_ascii r in
+    let n = String.length r in
+    if n > 4 && String.sub low (n - 4) 4 = ".git" then String.sub r 0 (n - 4) else r
+  in
+  let segs p = List.filter (fun x -> x <> "") (String.split_on_char '/' p) in
+  let path =
+    match chop "git@github.com:" s with
+    | Some rest -> Some (`Url rest)
+    | None ->
+      let noscheme =
+        match chop "https://" s with
+        | Some _ as hit -> hit
+        | None -> chop "http://" s
+      in
+      (match noscheme with
+       | None -> Some (`Bare s)
+       | Some rest ->
+         (match chop "github.com/" rest with
+          | Some _ as hit -> hit
+          | None -> chop "www.github.com/" rest)
+         |> Option.map (fun p -> `Url p))
+  in
+  match path with
+  | None -> s
+  | Some (`Bare b) ->
+    (match segs b with
+     | [ owner; repo ] -> owner ^ "/" ^ repo
+     | _ -> s)
+  | Some (`Url u) ->
+    (match segs u with
+     | owner :: repo :: _ -> owner ^ "/" ^ strip_git repo
+     | _ -> s)
+;;

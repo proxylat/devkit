@@ -2,35 +2,128 @@
 
 open Devkit.Manifest
 
+let contains = Devkit.Strutil.contains_substring
+
 let basic =
   "winget_path = \"C:\\\\tools\\\\winget.exe\"\n\n\
    [[section]]\n\
    name = \"tools\"\n\n\
    [[section.package]]\n\
-   pm = \"winget\"\n\
    id = \"Git.Git\"\n\
    upstream = \"git/git\"\n\n\
    [[section.package]]\n\
-   pm = \"npm\"\n\
-   id = \"pyright\"\n\
-   installed_version = \"1.2.3\"\n"
+   id = \"npm:pyright\"\n\
+   installed_version = \"1.2.3\"\n\n\
+   [[section.package]]\n\
+   id = \"owner/repo\"\n\n\
+   [[section.package]]\n\
+   id = \"https://example.com/dl/widget-2.0.exe\"\n"
 ;;
 
 let parses () =
   let r = parse basic in
   Alcotest.(check string) "winget path" "C:\\tools\\winget.exe" r.winget_path;
+  Alcotest.(check int) "no warnings" 0 (List.length r.warnings);
   match r.sections with
   | [ sec ] ->
     Alcotest.(check string) "section name" "tools" sec.name;
     (match sec.items with
-     | [ git; npm ] ->
+     | [ git; npm; gh; url ] ->
        Alcotest.(check string) "first id" "Git.Git" git.value;
        Alcotest.(check bool) "first typ" true (git.typ = Winget);
        Alcotest.(check string) "upstream" "git/git" git.upstream;
        Alcotest.(check string) "second id" "pyright" npm.value;
        Alcotest.(check string) "second pm" "npm" (type_string npm.typ);
-       Alcotest.(check string) "second version" "1.2.3" npm.installed_version
-     | _ -> Alcotest.fail "expected two items")
+       Alcotest.(check string) "second version" "1.2.3" npm.installed_version;
+       Alcotest.(check bool) "third typ" true (gh.typ = GitHub);
+       Alcotest.(check string) "third id" "owner/repo" gh.value;
+       Alcotest.(check bool) "fourth typ" true (url.typ = Url)
+     | _ -> Alcotest.fail "expected four items")
+  | _ -> Alcotest.fail "expected one section"
+;;
+
+let one_pkg id =
+  parse ("[[section]]\nname = \"t\"\n\n[[section.package]]\nid = \"" ^ id ^ "\"\n")
+;;
+
+let ladder () =
+  let cases =
+    [ "https://github.com/o/r/releases/download/v1/a.exe", GitHub, "o/r"
+    ; "https://github.com/o/r", GitHub, "o/r"
+    ; "https://github.com/o", Url, "https://github.com/o"
+    ; "git@github.com:o/r.git", GitHub, "o/r"
+    ; "winget:Git.Git", Winget, "Git.Git"
+    ; "NPM:typescript", Pm "npm", "typescript"
+    ; "cargo:ripgrep", Pm "cargo", "ripgrep"
+    ; "github:o/r/", GitHub, "o/r"
+    ; "@scope/pkg", Pm "npm", "@scope/pkg"
+    ; "npm:@scope/pkg", Pm "npm", "@scope/pkg"
+    ; "o/r", GitHub, "o/r"
+    ; "Git.Git", Winget, "Git.Git"
+    ; "url:https://x/y.exe", Url, "https://x/y.exe"
+    ]
+  in
+  List.iter
+    (fun (id, typ, value) ->
+       let r = one_pkg id in
+       Alcotest.(check int) ("no warnings: " ^ id) 0 (List.length r.warnings);
+       match r.sections with
+       | [ sec ] ->
+         (match sec.items with
+          | [ it ] ->
+            Alcotest.(check bool) ("typ: " ^ id) true (it.typ = typ);
+            Alcotest.(check string) ("value: " ^ id) value it.value
+          | _ -> Alcotest.fail ("expected one item: " ^ id))
+       | _ -> Alcotest.fail ("expected one section: " ^ id))
+    cases
+;;
+
+let rejections () =
+  let cases =
+    [ "typescript", "ambiguous"
+    ; "typescript", "npm:typescript"
+    ; "o/r/x", "owner/repo"
+    ; "github:o", "owner/repo"
+    ; "Foo.", "Publisher.App"
+    ; "npm:", "nothing after"
+    ; ":x", "empty prefix"
+    ; "", "empty id"
+    ; "npm:a b", "no spaces or backslashes"
+    ]
+  in
+  List.iter
+    (fun (id, frag) ->
+       let r = one_pkg id in
+       Alcotest.(check int) ("one warning: " ^ id) 1 (List.length r.warnings);
+       Alcotest.(check bool)
+         ("names fix: " ^ id)
+         true
+         (contains frag (List.nth r.warnings 0));
+       match r.sections with
+       | [ sec ] -> Alcotest.(check int) ("skipped: " ^ id) 0 (List.length sec.items)
+       | _ -> Alcotest.fail ("expected one section: " ^ id))
+    cases
+;;
+
+let pm_gone () =
+  let r =
+    parse
+      "[[section]]\n\
+       name = \"t\"\n\n\
+       [[section.package]]\n\
+       pm = \"npm\"\n\
+       id = \"pyright\"\n\n\
+       [[section.package]]\n\
+       pm = \"winget\"\n"
+  in
+  Alcotest.(check int) "two warnings" 2 (List.length r.warnings);
+  Alcotest.(check bool)
+    "names fixed form"
+    true
+    (contains "id = \"npm:pyright\"" (List.nth r.warnings 0));
+  Alcotest.(check bool) "missing id" true (contains "no id given" (List.nth r.warnings 1));
+  match r.sections with
+  | [ sec ] -> Alcotest.(check int) "both skipped" 0 (List.length sec.items)
   | _ -> Alcotest.fail "expected one section"
 ;;
 
@@ -42,12 +135,11 @@ let skips () =
        [[section]]\n\
        name = \"t\"\n\n\
        [[section.package]]\n\
-       pm = \"winget\"\n\
        id = \"\"\n\n\
        [[section.package]]\n\
-       pm = \"github\"\n\
        id = \"owner/repo\"\n"
   in
+  Alcotest.(check int) "empty id warns" 1 (List.length r.warnings);
   match r.sections with
   | [ sec ] ->
     (match sec.items with
@@ -61,12 +153,16 @@ let skips () =
 let malformed () =
   let r = parse "[[section\nname = " in
   Alcotest.(check int) "no sections" 0 (List.length r.sections);
-  Alcotest.(check string) "no winget path" "" r.winget_path
+  Alcotest.(check string) "no winget path" "" r.winget_path;
+  Alcotest.(check int) "no warnings" 0 (List.length r.warnings)
 ;;
 
 let round_trip () =
   let r = parse basic in
-  let r2 = parse (to_string r) in
+  let text = to_string r in
+  Alcotest.(check bool) "no pm key" false (contains "pm =" text);
+  Alcotest.(check bool) "prefixed npm" true (contains "npm:pyright" text);
+  let r2 = parse text in
   Alcotest.(check string) "winget path" r.winget_path r2.winget_path;
   Alcotest.(check int) "sections" (List.length r.sections) (List.length r2.sections);
   let ids secs = List.concat_map (fun s -> List.map (fun i -> i.value) s.items) secs in
@@ -80,6 +176,9 @@ let () =
     "manifest"
     [ ( "parse"
       , [ Alcotest.test_case "basic" `Quick parses
+        ; Alcotest.test_case "ladder" `Quick ladder
+        ; Alcotest.test_case "rejections" `Quick rejections
+        ; Alcotest.test_case "pm gone" `Quick pm_gone
         ; Alcotest.test_case "skips" `Quick skips
         ; Alcotest.test_case "malformed" `Quick malformed
         ] )

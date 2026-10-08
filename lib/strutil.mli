@@ -10,3 +10,8 @@ val contains_double_space : string -> bool
     a leading [v] is stripped, numeric segments compare as integers
     (missing segments count as 0), a release outranks a prerelease. *)
 val is_newer_version : string -> string -> bool
+
+(** [canon_repo] accepts a bare [owner/repo] or a full GitHub URL — repo
+    page, deep link, or clone URL — and returns the canonical [owner/repo].
+    Anything unrecognized is returned unchanged. *)
+val canon_repo : string -> string
