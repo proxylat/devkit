@@ -67,3 +67,7 @@
 (test
  (name test_provider)
  (libraries devkit alcotest))
+
+(test
+ (name test_verify)
+ (libraries devkit alcotest))

@@ -13,6 +13,7 @@ val status_to_string : status -> string
 type outcome =
   { value : string
   ; status : status
+  ; warnings : string list
   }
 
 (** Injected surface. {!real_deps} wires production backends. *)
@@ -22,6 +23,7 @@ type deps =
   ; open_browser : string -> (unit, string) result
   ; latest_release : Provider.t -> string -> (Gh.release, string) result
   ; download : url:string -> (string, string) result
+  ; fetch : Fetch.fetch
   ; run_installer : string -> (unit, string) result
   ; tools : Plugin.tool list
   }
@@ -40,11 +42,15 @@ val real_open_browser : ?os:string -> Bootstrap.spawn -> string -> (unit, string
 (** Dispatch an install/update for one manifest entry. A non-empty
     [upstream] diverts winget, github, gitlab, forgejo, and plugin rows
     to the vendor's release (the provider is parsed out of the pin).
-    [host] carries the self-hosted forge host for gitlab/forgejo rows. *)
+    [host] carries the self-hosted forge host for gitlab/forgejo rows.
+    [os] selects the platform for the Authenticode check (Win32 only).
+    Vendor-direct downloads are signature- and checksum-verified per
+    SecDoc; soft findings ride [warnings], blocks are [Failed]. *)
 val install
   :  deps
   -> ?upstream:string
   -> ?host:string
+  -> ?os:string
   -> string
   -> string
   -> bool

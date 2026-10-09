@@ -146,7 +146,7 @@ let open_keeps_status () =
     Tui.apply_outcome
       s
       "https://x"
-      { Install.value = "https://x"; status = Install.Opened }
+      { Install.value = "https://x"; status = Install.Opened; warnings = [] }
   in
   (match Tui.selected s with
    | Some e ->
@@ -172,7 +172,7 @@ let enter_notfound () =
 let apply_success () =
   let s = Tui.make (sections ()) ~height:10 ~width:80 in
   let s = Tui.step s Tui.Down in
-  let o = { Install.value = "b"; status = Install.Updated } in
+  let o = { Install.value = "b"; status = Install.Updated; warnings = [] } in
   let s = Tui.apply_outcome s "b" o in
   (match Tui.selected s with
    | Some e ->
@@ -187,7 +187,7 @@ let apply_success () =
 let apply_failure_keeps () =
   let s = Tui.make (sections ()) ~height:10 ~width:80 in
   let s = Tui.step s Tui.Down in
-  let o = { Install.value = "b"; status = Install.Failed "denied" } in
+  let o = { Install.value = "b"; status = Install.Failed "denied"; warnings = [] } in
   let s = Tui.apply_outcome s "b" o in
   match Tui.selected s with
   | Some e ->
@@ -196,6 +196,26 @@ let apply_failure_keeps () =
       true
       (e.Tui.item.Manifest.status = Manifest.NeedsUpdate)
   | None -> Alcotest.fail "no selection"
+;;
+
+let apply_warns_logged () =
+  let s = Tui.make (sections ()) ~height:10 ~width:80 in
+  let s = Tui.step s Tui.Down in
+  let o =
+    { Install.value = "b"
+    ; status = Install.Updated
+    ; warnings = [ "unsigned"; "no sums" ]
+    }
+  in
+  let s = Tui.apply_outcome s "b" o in
+  Alcotest.(check (list string))
+    "outcome plus warns"
+    [ "b: updated"; "b: warn: unsigned"; "b: warn: no sums" ]
+    s.Tui.log;
+  Alcotest.(check (option string))
+    "message stays outcome"
+    (Some "b: updated")
+    s.Tui.message
 ;;
 
 let frame_shape () =
@@ -268,7 +288,10 @@ let apply_failure_logs_reason () =
   let s = Tui.make (sections ()) ~height:10 ~width:80 in
   let s = Tui.step s Tui.Down in
   let s =
-    Tui.apply_outcome s "b" { Install.value = "b"; status = Install.Failed "denied" }
+    Tui.apply_outcome
+      s
+      "b"
+      { Install.value = "b"; status = Install.Failed "denied"; warnings = [] }
   in
   Alcotest.(check string)
     "full reason kept"
@@ -279,7 +302,7 @@ let apply_failure_logs_reason () =
     Tui.apply_outcome
       s
       "a"
-      { Install.value = "a"; status = Install.Skipped "no template" }
+      { Install.value = "a"; status = Install.Skipped "no template"; warnings = [] }
   in
   Alcotest.(check string)
     "skip reason kept"
@@ -291,7 +314,12 @@ let apply_to_sections_reflects_session () =
   let secs = sections () in
   let s = Tui.make secs ~height:10 ~width:80 in
   let s = Tui.step s Tui.Down in
-  let s = Tui.apply_outcome s "b" { Install.value = "b"; status = Install.Updated } in
+  let s =
+    Tui.apply_outcome
+      s
+      "b"
+      { Install.value = "b"; status = Install.Updated; warnings = [] }
+  in
   let out = Tui.apply_to_sections secs s in
   let b =
     List.concat_map (fun sec -> sec.Manifest.items) out
@@ -319,6 +347,7 @@ let () =
     ; ( "outcome"
       , [ Alcotest.test_case "success" `Quick apply_success
         ; Alcotest.test_case "failure keeps" `Quick apply_failure_keeps
+        ; Alcotest.test_case "warns logged" `Quick apply_warns_logged
         ; Alcotest.test_case "failure logs reason" `Quick apply_failure_logs_reason
         ; Alcotest.test_case "open keeps status" `Quick open_keeps_status
         ; Alcotest.test_case "end state green" `Quick apply_to_sections_reflects_session

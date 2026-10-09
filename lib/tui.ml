@@ -298,7 +298,8 @@ let apply_outcome (s : state) (value : string) (o : Install.outcome) : state =
       s.entries
   in
   let line = outcome_line value o.Install.status in
-  clamp { s with entries; message = Some line; log = s.log @ [ line ] }
+  let warns = List.map (fun w -> value ^ ": warn: " ^ w) o.Install.warnings in
+  clamp { s with entries; message = Some line; log = s.log @ [ line ] @ warns }
 ;;
 
 (** Overlay the session's row statuses back onto dashboard sections, so a

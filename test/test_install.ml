@@ -8,6 +8,7 @@ let base_deps
       ?(browser = fun _ -> Ok ())
       ?(latest = fun _ _ -> Error "no net")
       ?(download = fun ~url:_ -> Error "no net")
+      ?(fetch = fun ?timeout_s:_ _ _ -> Error "no net")
       ?(installer = fun _ -> Ok ())
       ?(tools = [])
       ()
@@ -18,6 +19,7 @@ let base_deps
   ; open_browser = browser
   ; latest_release = latest
   ; download
+  ; fetch
   ; run_installer = installer
   ; tools
   }
@@ -463,6 +465,101 @@ let test_forgejo_selfhosted () =
   Alcotest.(check bool) "installed" true (r.Install.status = Install.Installed)
 ;;
 
+let real_download () =
+  (* Fake download that writes a real temp file, so block-path
+     deletion is observable. *)
+  let path = ref "" in
+  let download ~url:_ =
+    let p = Filename.temp_file "devkit-inst-" ".exe" in
+    let oc = open_out_bin p in
+    output_string oc "payload";
+    close_out oc;
+    path := p;
+    Ok p
+  in
+  download, path
+;;
+
+let ps_spawn (status : string) : Bootstrap.spawn =
+  fun prog _ -> if prog = "powershell" then status, true else "", true
+;;
+
+let test_verify_sig_block_deletes () =
+  let download, path = real_download () in
+  let ran = ref false in
+  let d =
+    base_deps
+      ~spawn:(ps_spawn "HashMismatch")
+      ~latest:(fun _ _ -> Ok win_release)
+      ~download
+      ~installer:(fun _ ->
+        ran := true;
+        Ok ())
+      ()
+  in
+  let r = Install.install ~os:"Win32" d "github" "owner/tool" false in
+  (match r.Install.status with
+   | Install.Failed m ->
+     Alcotest.(check bool)
+       "names status"
+       true
+       (Strutil.contains_substring "HashMismatch" m)
+   | _ -> Alcotest.fail "expected Failed");
+  Alcotest.(check bool) "download deleted" false (Sys.file_exists !path);
+  Alcotest.(check bool) "installer never ran" false !ran
+;;
+
+let test_verify_sig_warn_proceeds () =
+  let download, path = real_download () in
+  let ran = ref false in
+  let d =
+    base_deps
+      ~spawn:(ps_spawn "NotSigned")
+      ~latest:(fun _ _ -> Ok win_release)
+      ~download
+      ~installer:(fun _ ->
+        ran := true;
+        Ok ())
+      ()
+  in
+  let r = Install.install ~os:"Win32" d "github" "owner/tool" false in
+  Alcotest.(check bool) "installed" true (r.Install.status = Install.Installed);
+  Alcotest.(check bool) "installer ran" true !ran;
+  (* signature warn + no-checksum-file warn, in pipeline order. *)
+  Alcotest.(check int) "two warnings" 2 (List.length r.Install.warnings);
+  Alcotest.(check bool)
+    "sig first"
+    true
+    (Strutil.contains_substring "unsigned" (List.nth r.Install.warnings 0));
+  try Sys.remove !path with
+  | _ -> ()
+;;
+
+let test_verify_sum_block_deletes () =
+  let sums =
+    { Gh.name = "SHA256SUMS"; browser_download_url = "https://x/s"; size = 1L }
+  in
+  let rel = { win_release with Gh.assets = [ win_asset; sums ] } in
+  let download, path = real_download () in
+  let d =
+    base_deps
+      ~spawn:(ps_spawn "Valid")
+      ~latest:(fun _ _ -> Ok rel)
+      ~fetch:(fun ?timeout_s:_ _ _ -> Ok (String.make 64 '0' ^ "  Tool-win-x64.exe\n"))
+      ~download
+      ()
+  in
+  let r = Install.install ~os:"Win32" d "github" "owner/tool" false in
+  (match r.Install.status with
+   | Install.Failed m ->
+     Alcotest.(check bool)
+       "mismatch"
+       true
+       (Strutil.contains_substring "mismatch" (String.lowercase_ascii m))
+   | _ -> Alcotest.fail "expected Failed");
+  Alcotest.(check bool) "download deleted" false (Sys.file_exists !path)
+;;
+
 let () =
   Alcotest.run
     "install"
@@ -501,6 +598,11 @@ let () =
     ; ( "dispatch"
       , [ Alcotest.test_case "url opens" `Quick test_url_opens
         ; Alcotest.test_case "unknown kind skips" `Quick test_unknown_kind_skips
+        ] )
+    ; ( "verify"
+      , [ Alcotest.test_case "sig block deletes" `Quick test_verify_sig_block_deletes
+        ; Alcotest.test_case "sig warn proceeds" `Quick test_verify_sig_warn_proceeds
+        ; Alcotest.test_case "sum block deletes" `Quick test_verify_sum_block_deletes
         ] )
     ; ( "plugin"
       , [ Alcotest.test_case "install happy" `Quick test_plugin_install_happy

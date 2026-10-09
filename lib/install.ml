@@ -36,10 +36,11 @@ let status_to_string = function
 type outcome =
   { value : string
   ; status : status
+  ; warnings : string list
   }
 
-let succeed value status = { value; status }
-let fail value msg = { value; status = Failed msg }
+let succeed ?(warnings = []) value status = { value; status; warnings }
+let fail ?(warnings = []) value msg = { value; status = Failed msg; warnings }
 
 (** Injected surface. {!real_deps} wires production backends. *)
 type deps =
@@ -48,6 +49,7 @@ type deps =
   ; open_browser : string -> (unit, string) result
   ; latest_release : Provider.t -> string -> (Gh.release, string) result
   ; download : url:string -> (string, string) result
+  ; fetch : Fetch.fetch
   ; run_installer : string -> (unit, string) result
   ; tools : Plugin.tool list
   }
@@ -128,6 +130,7 @@ let repo_page (repo : string) : string = "https://github.com/" ^ Strutil.canon_r
 let install_repo
       (d : deps)
       ~(value : string)
+      ~(os : string)
       (prov : Provider.t)
       (repo : string)
       (update : bool)
@@ -154,9 +157,27 @@ let install_repo
        (match d.download ~url:asset.Gh.browser_download_url with
         | Error e -> fail value e
         | Ok path ->
-          (match d.run_installer path with
-           | Ok () -> succeed value done_status
-           | Error e -> fail value e)))
+          (* SecDoc pipeline: signature Authenticode first, checksum
+             file regardless; either layer can block. *)
+          let sig_v = Verify.signature ~os ~spawn:d.spawn path in
+          let sum_v =
+            Verify.checksum ~fetch:d.fetch rel.Gh.assets ~asset:asset.Gh.name ~path
+          in
+          let warns =
+            List.filter_map
+              (function
+                | Verify.Warn w -> Some w
+                | _ -> None)
+              [ sig_v; sum_v ]
+          in
+          (match sig_v, sum_v with
+           | Verify.Block m, _ | _, Verify.Block m ->
+             Verify.discard path;
+             fail ~warnings:warns value m
+           | _ ->
+             (match d.run_installer path with
+              | Ok () -> succeed ~warnings:warns value done_status
+              | Error e -> fail ~warnings:warns value e))))
 ;;
 
 (** Install/update via a plugin tool's command template. Only [{id}]
@@ -190,6 +211,7 @@ let install
       (d : deps)
       ?(upstream : string = "")
       ?(host : string = "")
+      ?(os : string = Sys.os_type)
       (kind : string)
       (value : string)
       (update : bool)
@@ -200,21 +222,21 @@ let install
     if upstream <> ""
     then (
       let prov, repo = Provider.of_upstream upstream in
-      install_repo d ~value prov repo update)
+      install_repo d ~value ~os prov repo update)
     else install_winget d value update
   | "github" ->
     let prov, repo =
       if upstream <> "" then Provider.of_upstream upstream else Provider.GitHub, value
     in
-    install_repo d ~value prov repo update
+    install_repo d ~value ~os prov repo update
   | "gitlab" ->
     let host = if host = "" then "gitlab.com" else host in
     let repo = if upstream <> "" then snd (Provider.of_upstream upstream) else value in
-    install_repo d ~value (Provider.GitLab host) repo update
+    install_repo d ~value ~os (Provider.GitLab host) repo update
   | "forgejo" ->
     let host = if host = "" then "codeberg.org" else host in
     let repo = if upstream <> "" then snd (Provider.of_upstream upstream) else value in
-    install_repo d ~value (Provider.Forgejo host) repo update
+    install_repo d ~value ~os (Provider.Forgejo host) repo update
   | "url" ->
     (match d.open_browser value with
      | Ok () -> succeed value Opened
@@ -223,10 +245,11 @@ let install
     if upstream <> ""
     then (
       let prov, repo = Provider.of_upstream upstream in
-      install_repo d ~value prov repo update)
+      install_repo d ~value ~os prov repo update)
     else (
       match Plugin.find other d.tools with
-      | None -> { value; status = Skipped ("unsupported type \"" ^ other ^ "\"") }
+      | None ->
+        { value; status = Skipped ("unsupported type \"" ^ other ^ "\""); warnings = [] }
       | Some t -> install_plugin d t value update)
 ;;
 
@@ -243,6 +266,7 @@ let real_deps (fetch : Fetch.fetch) ~winget_override () : deps =
   ; open_browser = real_open_browser Bootstrap.real_spawn
   ; latest_release = Provider.latest fetch
   ; download = (fun ~url -> Hash.download_and_verify fetch Hash.No_expected url)
+  ; fetch
   ; run_installer = run_installer Bootstrap.real_spawn
   ; tools = Inventory.built_ins
   }

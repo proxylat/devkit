@@ -130,11 +130,11 @@ let press_enter ~draw (deps : Install.deps) (st : Tui.state) : Tui.state Lwt.t =
     (match deps.Install.open_browser url with
      | Ok () ->
        let value = item.Manifest.value in
-       let o = { Install.value; status = Install.Opened } in
+       let o = { Install.value; status = Install.Opened; warnings = [] } in
        Lwt.return (Tui.apply_outcome st value o)
      | Error e ->
        let value = item.Manifest.value in
-       let o = { Install.value; status = Install.Failed e } in
+       let o = { Install.value; status = Install.Failed e; warnings = [] } in
        Lwt.return (Tui.apply_outcome st value o))
 ;;
 
