@@ -316,6 +316,21 @@ let checksum_no_line () =
       (Strutil.contains_substring "Tool.exe" (warn_text v)))
 ;;
 
+let discard_keeps_parent_dir () =
+  (* Regression: discard must never rmdir the parent dir (CI TMPDIR
+     is a fresh shared dir; removing it broke every parallel suite). *)
+  let dir = Filename.temp_dir "devkit-discard-" "" in
+  let path = Filename.concat dir "tool.exe" in
+  let oc = open_out_bin path in
+  output_string oc "x";
+  close_out oc;
+  Verify.discard path;
+  Alcotest.(check bool) "file gone" false (Sys.file_exists path);
+  Alcotest.(check bool) "dir kept" true (Sys.file_exists dir);
+  try Unix.rmdir dir with
+  | _ -> ()
+;;
+
 let () =
   Alcotest.run
     "verify"
@@ -346,5 +361,6 @@ let () =
         ; Alcotest.test_case "mismatch blocks" `Quick checksum_mismatch
         ; Alcotest.test_case "no line warns" `Quick checksum_no_line
         ] )
+    ; "discard", [ Alcotest.test_case "keeps parent dir" `Quick discard_keeps_parent_dir ]
     ]
 ;;

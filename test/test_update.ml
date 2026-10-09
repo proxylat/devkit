@@ -220,6 +220,49 @@ let upstream_forge_urls () =
        !urls)
 ;;
 
+let selfp typ value version =
+  { (make_item typ value) with installed_version = version; status = Installed }
+;;
+
+let upstream_self_pin () =
+  (* Forge rows without an explicit pin answer to their own id, each
+     on its own provider's API; same-version and unpinned winget rows
+     stay quiet. *)
+  let fetch ?timeout_s:_ url _ =
+    if Strutil.contains_substring "repos/new/tool" url
+    then Ok {|{"tag_name": "v2.0", "assets": []}|}
+    else if Strutil.contains_substring "repos/same/tool" url
+    then Ok {|{"tag_name": "v1.0", "assets": []}|}
+    else if Strutil.contains_substring "gitlab.com" url
+    then Ok {|[{"tag_name": "v2.0", "assets": {"links": []}}]|}
+    else if Strutil.contains_substring "codeberg.org" url
+    then Ok {|{"tag_name": "v3.0", "assets": []}|}
+    else Error "404"
+  in
+  let items =
+    [ selfp GitHub "new/tool" "1.0"
+    ; selfp (GitLab "gitlab.com") "group/proj" "1.0"
+    ; selfp (Forgejo "codeberg.org") "o/r" "1.0"
+    ; selfp GitHub "same/tool" "1.0"
+    ; selfp Winget "No.Pin" "1.0"
+    ]
+  in
+  Alcotest.(check (list (pair string string)))
+    "self pins behind"
+    [ "new/tool", "v2.0"; "group/proj", "v2.0"; "o/r", "v3.0" ]
+    (Update.upstream_updates fetch items)
+;;
+
+let check_all_self_pin () =
+  (* The check_all partition routes self-pinned rows to the vendor
+     tag check; the registry runner never fires. *)
+  let run _ _ = Alcotest.fail "registry must not run for self-pinned rows" in
+  let fetch ?timeout_s:_ _ _ = Ok {|{"tag_name": "v2.0", "assets": []}|} in
+  let got, warns = Update.check_all ~run ~fetch [ selfp GitHub "new/tool" "1.0" ] in
+  Alcotest.(check (list (pair string string))) "tagged" [ "new/tool", "v2.0" ] got;
+  Alcotest.(check (list string)) "no yanks" [] warns
+;;
+
 let check_all_pins_skip_registry () =
   (* A pinned npm row hits the GitHub API, never npm outdated. *)
   let run _ _ = Alcotest.fail "registry must not run for pinned rows" in
@@ -290,6 +333,8 @@ let () =
     ; ( "upstream"
       , [ Alcotest.test_case "newer/current/fail" `Quick upstream_newer_current_fail
         ; Alcotest.test_case "forge urls" `Quick upstream_forge_urls
+        ; Alcotest.test_case "self pin" `Quick upstream_self_pin
+        ; Alcotest.test_case "check_all self pin" `Quick check_all_self_pin
         ; Alcotest.test_case
             "check_all skips registry"
             `Quick

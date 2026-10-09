@@ -344,6 +344,28 @@ let quarantine_round_trip () =
   Alcotest.(check bool) "zero not emitted" false (contains "quarantine" (to_string plain))
 ;;
 
+let effective_upstream_self_pin () =
+  (* Explicit pins win; forge rows without one answer to their own id;
+     everything else yields no vendor repo. *)
+  let module P = Devkit.Provider in
+  let eff typ value upstream =
+    effective_upstream { (make_item typ value) with upstream }
+  in
+  let cases =
+    [ eff Winget "Git.Git" "git/git", Some (P.GitHub, "git/git")
+    ; eff GitHub "o/r" "x/y", Some (P.GitHub, "x/y")
+    ; eff GitHub "o/r" "", Some (P.GitHub, "o/r")
+    ; eff (GitLab "git.example.com") "g/p" "", Some (P.GitLab "git.example.com", "g/p")
+    ; eff (Forgejo "codeberg.org") "o/r" "", Some (P.Forgejo "codeberg.org", "o/r")
+    ; eff Winget "Git.Git" "", None
+    ; eff (Pm "npm") "typescript" "", None
+    ; eff Url "https://x/y.exe" "", None
+    ; eff Registry "VLC media player" "", None
+    ]
+  in
+  List.iter (fun (got, want) -> Alcotest.(check bool) "upstream" true (got = want)) cases
+;;
+
 let () =
   Alcotest.run
     "manifest"
@@ -356,6 +378,7 @@ let () =
         ; Alcotest.test_case "malformed" `Quick malformed
         ; Alcotest.test_case "sources" `Quick sources
         ; Alcotest.test_case "quarantine" `Quick quarantine
+        ; Alcotest.test_case "effective upstream" `Quick effective_upstream_self_pin
         ] )
     ; ( "render"
       , [ Alcotest.test_case "round_trip" `Quick round_trip

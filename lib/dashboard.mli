@@ -18,9 +18,9 @@ val format_ver : Manifest.item -> string
     scan) count as installed. [os] selects the probe shell (default:
     [Sys.os_type]) so tests stay platform-independent. [upstream_ver]
     maps an [(provider, upstream repo)] pair to its latest release tag:
-    rows of any kind pinned to an official repo compare against the vendor tag
-    instead of their PM's reading, and a failed lookup keeps the PM
-    reading. Matching is candidate-based (full value,
+    pinned rows, plus forge rows self-pinned to their own id, compare
+    against the vendor tag instead of their PM's reading, and a failed
+    lookup keeps the PM reading. Matching is candidate-based (full value,
     basename, URL stem), not exact-id. *)
 val build_sections
   :  ?show:(string -> string option)

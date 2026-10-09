@@ -210,12 +210,9 @@ let attestation ?(os = Sys.os_type) ~spawn ~(repo : string) (path : string) : ve
              (if text = "" then "no output" else text))))
 ;;
 
-(** Delete a blocked download and its temp dir, ignoring errors
-    (same cleanup {!Hash.download_and_verify} does on mismatch). *)
+(** Delete a blocked download, ignoring errors. Removes the file only:
+    the parent dir is not ours to remove (it may be the shared TMPDIR). *)
 let discard (path : string) : unit =
-  try
-    Sys.remove path;
-    Unix.rmdir (Filename.dirname path)
-  with
+  try Sys.remove path with
   | _ -> ()
 ;;

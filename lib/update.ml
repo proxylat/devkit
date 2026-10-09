@@ -121,22 +121,25 @@ let cargo_updates (fetch : Fetch.fetch) (versions : (string * string) list)
     versions
 ;;
 
-(** Pinned rows answer to the vendor tag, whatever their PM: compare
-    the installed version against the latest release tag, up to 8 in
-    flight. Unpinned, versionless, non-Installed, failed, and current
-    rows yield no update. *)
+(** Pinned rows, plus forge rows self-pinned to their own id, answer to
+    the vendor tag, whatever their PM: compare the installed version
+    against the latest release tag, up to 8 in flight. Unpinned
+    non-forge, versionless, non-Installed, failed, and current rows
+    yield no update. *)
 let upstream_updates (fetch : Fetch.fetch) (items : item list) : (string * string) list =
   let one (it : item) =
-    if it.upstream = "" || it.installed_version = "" || it.status <> Installed
-    then None
-    else (
-      let prov, repo = Provider.of_upstream it.upstream in
-      match Provider.latest fetch prov repo with
-      | Error _ -> None
-      | Ok rel ->
-        if Strutil.is_newer_version it.installed_version rel.Gh.tag_name
-        then Some (it.value, rel.Gh.tag_name)
-        else None)
+    match effective_upstream it with
+    | None -> None
+    | Some (prov, repo) ->
+      if it.installed_version = "" || it.status <> Installed
+      then None
+      else (
+        match Provider.latest fetch prov repo with
+        | Error _ -> None
+        | Ok rel ->
+          if Strutil.is_newer_version it.installed_version rel.Gh.tag_name
+          then Some (it.value, rel.Gh.tag_name)
+          else None)
   in
   List.filter_map Fun.id (Proc.par_map8 one items)
 ;;
@@ -145,19 +148,9 @@ let upstream_updates (fetch : Fetch.fetch) (items : item list) : (string * strin
     the vendor pulled the release. Only rows with a derivable provider
     (pinned, or forge-kind) are probed, in parallel; network failures
     stay silent — unreachable is not yanked. *)
-let yank_warns (fetch : Fetch.fetch) (lock : Lockfile.t) (items : item list)
-  : string list
+let yank_warns (fetch : Fetch.fetch) (lock : Lockfile.t) (items : item list) : string list
   =
-  let prov_of (it : item) =
-    if it.upstream <> ""
-    then Some (Provider.of_upstream it.upstream)
-    else (
-      match it.typ with
-      | GitHub -> Some (Provider.GitHub, it.value)
-      | GitLab h -> Some (Provider.GitLab h, it.value)
-      | Forgejo h -> Some (Provider.Forgejo h, it.value)
-      | _ -> None)
-  in
+  let prov_of = effective_upstream in
   let one (it : item) =
     match prov_of it with
     | None -> None
@@ -184,10 +177,11 @@ let yank_warns (fetch : Fetch.fetch) (lock : Lockfile.t) (items : item list)
 ;;
 
 (** Group Installed Pm items by manager: npm via [outdated], pipx and
-    uv via PyPI, cargo via crates.io. Pinned rows of any kind check
-    the vendor tag instead of their registry. Anything else (winget,
-    links, unknown Pms, non-Installed rows) is ignored. The yank pass
-    warns for locked tags that no longer exist upstream. *)
+    uv via PyPI, cargo via crates.io. Pinned rows of any kind, plus
+    self-pinned forge rows, check the vendor tag instead of their
+    registry. Anything else (winget, links, unknown Pms,
+    non-Installed rows) is ignored. The yank pass warns for locked
+    tags that no longer exist upstream. *)
 let check_all
       ~(run : Proc.runner)
       ~(fetch : Fetch.fetch)
@@ -195,7 +189,9 @@ let check_all
       (items : item list)
   : (string * string) list * string list
   =
-  let pinned, rest = List.partition (fun it -> it.upstream <> "") items in
+  let pinned, rest =
+    List.partition (fun it -> Option.is_some (effective_upstream it)) items
+  in
   let installed =
     List.filter_map
       (fun it ->

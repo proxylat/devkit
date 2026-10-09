@@ -472,11 +472,13 @@ let test_forgejo_selfhosted () =
 ;;
 
 let real_download () =
-  (* Fake download that writes a real temp file, so block-path
-     deletion is observable. *)
+  (* Fake download that writes a real temp file inside a per-test subdir
+     (like {!Hash.download_and_verify}), so block-path deletion is
+     observable without touching shared dirs. *)
   let path = ref "" in
   let download ~url:_ =
-    let p = Filename.temp_file "devkit-inst-" ".exe" in
+    let dir = Filename.temp_dir "devkit-inst-" "" in
+    let p = Filename.concat dir "tool.exe" in
     let oc = open_out_bin p in
     output_string oc "payload";
     close_out oc;
@@ -569,9 +571,7 @@ let test_verify_sum_block_deletes () =
 let test_lock_records_entry () =
   let download, path = real_download () in
   let saved = ref [] in
-  let d =
-    base_deps ~latest:(fun _ _ -> Ok win_release) ~download ~lock_saved:saved ()
-  in
+  let d = base_deps ~latest:(fun _ _ -> Ok win_release) ~download ~lock_saved:saved () in
   let r = Install.install d "github" "owner/tool" false in
   Alcotest.(check bool) "installed" true (r.Install.status = Install.Installed);
   (match Lockfile.find !saved "owner/tool" with
@@ -585,8 +585,8 @@ let test_lock_records_entry () =
      in
      Alcotest.(check string) "sha" sha e.Lockfile.sha256;
      Alcotest.(check string) "host" "github.com" e.Lockfile.host);
-  (try Sys.remove !path with
-   | _ -> ())
+  try Sys.remove !path with
+  | _ -> ()
 ;;
 
 let test_lock_blocks_recut_tag () =
@@ -638,10 +638,7 @@ let test_quarantine_blocks_young () =
   let r = Install.install ~quarantine_days:5 d "github" "owner/tool" false in
   (match r.Install.status with
    | Install.Failed m ->
-     Alcotest.(check bool)
-       "quarantined"
-       true
-       (Strutil.contains_substring "quarantined" m)
+     Alcotest.(check bool) "quarantined" true (Strutil.contains_substring "quarantined" m)
    | _ -> Alcotest.fail "expected Failed");
   Alcotest.(check bool) "no download" false !downloaded
 ;;

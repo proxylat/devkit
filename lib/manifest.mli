@@ -50,6 +50,12 @@ val make_item : item_type -> string -> item
 val type_string : item_type -> string
 val item_type_of_string : string -> item_type
 
+(** The vendor repo a row answers to: the explicit [upstream] pin when
+    set, else the row's own id for forge kinds (GitHub, GitLab,
+    Forgejo) — repo rows are self-pinned. [None] for winget, link,
+    manager, and registry rows without a pin. *)
+val effective_upstream : item -> (Provider.t * string) option
+
 (** Parse a manifest. The id carries its own source: github.com URLs
     canonicalize to [owner/repo], gitlab.com and codeberg.org URLs
     infer their forge, other URLs are plain links, [prefix:name] is

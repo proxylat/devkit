@@ -101,6 +101,20 @@ let item_type_of_string s =
   | _ -> Pm s
 ;;
 
+(** The vendor repo a row answers to: the explicit [upstream] pin when
+    set, else the row's own id for forge kinds — repo rows are
+    self-pinned. [None] for rows with no vendor repo. *)
+let effective_upstream it =
+  if it.upstream <> ""
+  then Some (Provider.of_upstream it.upstream)
+  else (
+    match it.typ with
+    | GitHub -> Some (Provider.GitHub, it.value)
+    | GitLab h -> Some (Provider.GitLab h, it.value)
+    | Forgejo h -> Some (Provider.Forgejo h, it.value)
+    | _ -> None)
+;;
+
 open Toml.Lenses
 
 let get_str tbl k =

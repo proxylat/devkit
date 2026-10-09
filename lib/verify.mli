@@ -47,5 +47,5 @@ val checksum
   -> path:string
   -> verdict
 
-(** Delete a blocked download and its temp dir, ignoring errors. *)
+(** Delete a blocked download, ignoring errors. Removes the file only. *)
 val discard : string -> unit

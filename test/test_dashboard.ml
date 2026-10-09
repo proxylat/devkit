@@ -386,6 +386,51 @@ let upstream_all_pms () =
   | _ -> Alcotest.fail "prettier should be Installed"
 ;;
 
+let upstream_self_pin () =
+  (* Forge rows without an explicit pin answer to their own id, each
+     on its own provider: behind rows go pending, the current row
+     lands green with no noise. *)
+  let manifest =
+    [ { name = "Tools"
+      ; items =
+          [ item GitHub "o/tool"
+          ; item (GitLab "gitlab.com") "g/proj"
+          ; item (Forgejo "codeberg.org") "o/r"
+          ]
+      }
+    ]
+  in
+  let apps =
+    [ Dashboard.{ name = "tool"; version = "1.0.0"; pm = "github" }
+    ; Dashboard.{ name = "proj"; version = "1.0.0"; pm = "gitlab" }
+    ; Dashboard.{ name = "r"; version = "3.0.0"; pm = "forgejo" }
+    ]
+  in
+  let upstream_ver prov repo =
+    match prov, repo with
+    | Devkit.Provider.GitHub, "o/tool" -> Some "v2.0"
+    | Devkit.Provider.GitLab "gitlab.com", "g/proj" -> Some "v1.0.0"
+    | Devkit.Provider.Forgejo "codeberg.org", "o/r" -> Some "v9.9"
+    | _ -> None
+  in
+  let sections = Dashboard.build_sections ~upstream_ver apps manifest None in
+  Alcotest.(check int) "pending + installed" 2 (List.length sections);
+  let pending = List.nth sections 0 in
+  Alcotest.(check string) "pending first" "Pending updates" pending.name;
+  Alcotest.(check int) "two behind" 2 (List.length pending.items);
+  let tool = List.nth pending.items 0 in
+  Alcotest.(check string) "github tag" "v2.0" tool.available_version;
+  let r = List.nth pending.items 1 in
+  Alcotest.(check string) "forgejo tag" "v9.9" r.available_version;
+  let done_ = List.nth sections 1 in
+  Alcotest.(check string) "installed last" "Installed" done_.name;
+  let proj = List.nth done_.items 0 in
+  Alcotest.(check string) "no noise" "" proj.available_version;
+  match proj.status with
+  | Installed -> ()
+  | _ -> Alcotest.fail "proj should be Installed"
+;;
+
 let reg_app name version = Dashboard.{ name; version; pm = "registry" }
 
 let reg_rescue () =
@@ -467,6 +512,7 @@ let () =
             `Quick
             upstream_offline_keeps_winget
         ; Alcotest.test_case "upstream all pms" `Quick upstream_all_pms
+        ; Alcotest.test_case "upstream self pin" `Quick upstream_self_pin
         ; Alcotest.test_case "url stem match" `Quick url_stem_match
         ; Alcotest.test_case "registry rescue" `Quick reg_rescue
         ; Alcotest.test_case "registry negative" `Quick reg_negative

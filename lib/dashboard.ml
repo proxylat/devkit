@@ -119,7 +119,8 @@ let subset (small : string list) (big : string list) : bool =
     A manifest section literally named "winget" is dropped (it is a
     leftover artifact, never real content).
 
-    Rows of any kind pinned to an [upstream] repo compare against the
+    Rows with an [upstream] pin — plus forge rows (GitHub, GitLab,
+    Forgejo), self-pinned to their own id — compare against the
     vendor's release tag ([?upstream_ver]) instead of their PM's
     reading; a failed lookup keeps the PM reading. *)
 let build_sections
@@ -269,20 +270,20 @@ let build_sections
          })
       pkgs_sections
   in
-  (* 2b. Upstream truth: rows of any kind pinned to an official repo
-     compare their installed version against the vendor's release tag
-     instead of trusting their PM's reading. Each repo is queried once,
-     up to 8 in flight; a failed query keeps the PM reading (offline
-     fallback). Rows without an installed version skip the check: with
-     nothing installed there is nothing to compare. *)
+  (* 2b. Upstream truth: pinned rows, plus forge rows self-pinned to
+     their own id, compare their installed version against the vendor's
+     release tag instead of trusting their PM's reading. Each repo is
+     queried once, up to 8 in flight; a failed query keeps the PM
+     reading (offline fallback). Rows without an installed version skip
+     the check: with nothing installed there is nothing to compare. *)
   let upstream_ids =
     List.concat_map
       (fun sec ->
          List.filter_map
            (fun it ->
-              if it.upstream <> "" && (it.status = Installed || it.status = NeedsUpdate)
-              then Some (Provider.of_upstream it.upstream)
-              else None)
+              match effective_upstream it with
+              | Some pr when it.status = Installed || it.status = NeedsUpdate -> Some pr
+              | _ -> None)
            sec.items)
       pkgs_sections
     |> List.sort_uniq compare
@@ -301,17 +302,18 @@ let build_sections
            items =
              List.map
                (fun it ->
-                  if it.upstream = "" || it.installed_version = ""
-                  then it
-                  else (
-                    match
-                      Hashtbl.find_opt upstream_table (Provider.of_upstream it.upstream)
-                    with
-                    | None | Some None -> it
-                    | Some (Some tag) ->
-                      if Strutil.is_newer_version it.installed_version tag
-                      then { it with available_version = tag; status = NeedsUpdate }
-                      else { it with available_version = ""; status = Installed }))
+                  match effective_upstream it with
+                  | None -> it
+                  | Some pr ->
+                    if it.installed_version = ""
+                    then it
+                    else (
+                      match Hashtbl.find_opt upstream_table pr with
+                      | None | Some None -> it
+                      | Some (Some tag) ->
+                        if Strutil.is_newer_version it.installed_version tag
+                        then { it with available_version = tag; status = NeedsUpdate }
+                        else { it with available_version = ""; status = Installed }))
                sec.items
          })
       pkgs_sections

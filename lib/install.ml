@@ -191,9 +191,7 @@ let install_verified
          (short sha))
   | _ ->
     let sig_v = Verify.signature ~os ~spawn:d.spawn path in
-    let sum_v =
-      Verify.checksum ~fetch:d.fetch rel.Gh.assets ~asset:asset.Gh.name ~path
-    in
+    let sum_v = Verify.checksum ~fetch:d.fetch rel.Gh.assets ~asset:asset.Gh.name ~path in
     let att_v = Verify.attestation ~os ~spawn:d.spawn ~repo:value path in
     let thumb = Verify.signer ~os ~spawn:d.spawn path in
     let signer_warn =
@@ -213,7 +211,10 @@ let install_verified
           | Verify.Warn w -> Some w
           | _ -> None)
         [ sig_v; sum_v; att_v ]
-      @ (match signer_warn with Some w -> [ w ] | None -> [])
+      @
+      match signer_warn with
+      | Some w -> [ w ]
+      | None -> []
     in
     (match sig_v, sum_v, att_v with
      | Verify.Block m, _, _ | _, Verify.Block m, _ | _, _, Verify.Block m ->
@@ -228,17 +229,16 @@ let install_verified
             | Provider.GitHub -> "github.com"
             | Provider.GitLab h | Provider.Forgejo h -> h
           in
-          let thumbprint = match thumb with Some t -> t | None -> "" in
+          let thumbprint =
+            match thumb with
+            | Some t -> t
+            | None -> ""
+          in
           d.lock_save
             (Lockfile.upsert
                lock
                Lockfile.
-                 { id = value
-                 ; tag = rel.Gh.tag_name
-                 ; sha256 = sha
-                 ; thumbprint
-                 ; host
-                 });
+                 { id = value; tag = rel.Gh.tag_name; sha256 = sha; thumbprint; host });
           succeed ~warnings:warns value done_status))
 ;;
 
@@ -382,8 +382,7 @@ let real_deps
         match read_file Lockfile.filename with
         | Error _ -> []
         | Ok text -> Lockfile.parse text)
-  ; lock_save =
-      (fun t -> ignore (write_file Lockfile.filename (Lockfile.to_string t)))
+  ; lock_save = (fun t -> ignore (write_file Lockfile.filename (Lockfile.to_string t)))
   ; tools = Inventory.built_ins
   }
 ;;
