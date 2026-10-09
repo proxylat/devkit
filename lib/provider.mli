@@ -48,3 +48,12 @@ val parse : t -> string -> (Gh.release, string) result
 
 (** Latest release for [repo] on [p]. Empty tags are an [Error]. *)
 val latest : Fetch.fetch -> t -> string -> (Gh.release, string) result
+
+(** [tag_exists fetch p repo tag] is whether release [tag] still
+    exists upstream (yank detection). A fetch error holding ["404"]
+    answers [Ok false]; any other fetch error passes through as
+    [Error]; a parseable body whose tag matches answers [Ok true], a
+    mismatched tag [Ok false], an empty tag or unparseable body an
+    [Error]. GitHub/Forgejo tags go raw (slash-tags are a known
+    limitation); the GitLab tag is percent-encoded. *)
+val tag_exists : Fetch.fetch -> t -> string -> string -> (bool, string) result

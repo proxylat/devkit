@@ -1,7 +1,7 @@
 (** devkit CLI.
 
      Commands: default (dashboard), import, add, append [--new], export
-     [-o]. The default command opens the interactive TUI on a terminal
+     [-o], doctor. The default command opens the interactive TUI on a terminal
      and prints the plain-text dashboard when piped. *)
 
 open Devkit
@@ -152,12 +152,27 @@ let export_cmd =
     Cmdliner.Term.(const run $ output $ only $ except)
 ;;
 
+let doctor_cmd =
+  let run () =
+    match App.doctor_view (make_env ()) with
+    | Error e ->
+      prerr_endline ("devkit: " ^ e);
+      exit 1
+    | Ok lines -> print_lines lines
+  in
+  Cmdliner.Cmd.v
+    (Cmdliner.Cmd.info
+       "doctor"
+       ~doc:"Check winget source hygiene and manifest InstallerUrl hosts")
+    Cmdliner.Term.(const run $ const ())
+;;
+
 let () =
   let group =
     Cmdliner.Cmd.group
       ~default:default_term
       default_info
-      [ import_cmd; add_cmd; append_cmd; export_cmd ]
+      [ import_cmd; add_cmd; append_cmd; export_cmd; doctor_cmd ]
   in
   exit (Cmdliner.Cmd.eval group)
 ;;

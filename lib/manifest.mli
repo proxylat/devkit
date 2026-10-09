@@ -27,6 +27,7 @@ type item =
   ; status : status
   ; upstream : string
     (** vendor pin: [owner/repo], a forge URL, or a [gitlab:]/[forgejo:]-prefixed id; empty disables *)
+  ; quarantine_days : int (** resolved N-day new-release hold; 0 = off *)
   }
 
 type section =
@@ -39,6 +40,7 @@ type parse_result =
   ; winget_path : string
   ; warnings : string list (** skipped rows, in document order, naming the fix *)
   ; sources : string list (** scan sources in order; {!default_sources} when unset *)
+  ; quarantine : int (** global N-day quarantine; 0 = off *)
   }
 
 (** Scan sources when the manifest sets none: classic order, registry last. *)
@@ -54,10 +56,14 @@ val item_type_of_string : string -> item_type
     explicit, [@scope/pkg] is npm, [owner/repo] is GitHub, dotted ids
     are winget, bare words are rejected — as is any leftover [pm] key.
     Self-hosted forges need [gitlab:]/[forgejo:] with the full URL.
+    A top-level [quarantine_days] sets the global N-day hold (negatives
+    clamp to 0, non-ints are ignored); each package resolves to its own
+    [quarantine_days] override when present, else the global.
     Rejected rows are skipped with a [warnings] entry; malformed TOML
     yields an empty result. *)
 val parse : string -> parse_result
 
 (** Render back to TOML: one [id] line per package (manager kinds keep
-    their [prefix:], self-identifying shapes stay bare). *)
+    their [prefix:], self-identifying shapes stay bare). Nonzero global
+    and per-row [quarantine_days] are emitted. *)
 val to_string : parse_result -> string

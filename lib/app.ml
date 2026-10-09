@@ -300,6 +300,7 @@ let append_selected (fs : fs) (path : string) (items : item list) : (unit, strin
           ; winget_path = ""
           ; warnings = []
           ; sources = []
+          ; quarantine = 0
           }
     in
     fs.append_file path text)
@@ -473,13 +474,97 @@ let json_sibling (output : string) : string =
   else output ^ ".json"
 ;;
 
-(** Export groups by {!pm_order} plus any custom tool names in file
-    order, so custom tools are never dropped from the manifest. *)
-let order_for (tools : Plugin.tool list) : string list =
-  pm_order
-  @ List.filter
-      (fun n -> not (List.mem n pm_order))
-      (List.map (fun (t : Plugin.tool) -> t.name) tools)
+(** [doctor_view]: winget supply-chain hygiene. Reports the configured
+    winget sources (msstore expected), then cross-checks every manifest
+    winget row's community-manifest InstallerUrl hosts against the
+    upstream pin's forge host. Unpinned rows report hosts without a
+    verdict — there is no vendor to compare against. *)
+let doctor_view (e : env) : (string list, string) result =
+  let sections, winget_path, _ = load_manifest e.fs Manifest.filename in
+  let winget =
+    match Bootstrap.ensure ~override_path:winget_path e.bio with
+    | Ok p -> p
+    | Error _ -> ""
+  in
+  let src_lines =
+    if winget = ""
+    then [ "source hygiene: winget unavailable (skipped)" ]
+    else (
+      match e.run winget [ "source"; "list" ] with
+      | None -> [ "source hygiene: query failed" ]
+      | Some out ->
+        let verdict =
+          if Strutil.contains_substring "msstore" (lower out)
+          then "source hygiene: ok (msstore present)"
+          else "source hygiene: note (no msstore source configured)"
+        in
+        let rows =
+          List.filter_map
+            (fun ln ->
+               let t = String.trim ln in
+               if t = "" then None else Some ("  " ^ t))
+            (String.split_on_char '\n' out)
+        in
+        verdict :: rows)
+  in
+  let winget_rows =
+    List.filter
+      (fun it -> it.typ = Winget)
+      (List.concat_map (fun (sec : section) -> sec.items) sections)
+  in
+  (* Release assets ride CDNs, not the repo host: GitHub serves from
+     objects/release-assets hosts, forges from their own host. *)
+  let expected_of = function
+    | Provider.GitHub ->
+      [ "github.com"; "objects.githubusercontent.com"; "release-assets.githubusercontent.com" ]
+    | Provider.GitLab h | Provider.Forgejo h -> [ lower h ]
+  in
+  let prov_host = function
+    | Provider.GitHub -> "github.com"
+    | Provider.GitLab h | Provider.Forgejo h -> h
+  in
+  let host_match h x =
+    h = x
+    || (String.length h > String.length x
+        && String.sub h (String.length h - String.length x - 1) (String.length x + 1)
+           = "." ^ x)
+  in
+  let check_row (it : item) : string list =
+    let lookup () =
+      match Winget_manifest.list_versions e.fetch it.value with
+      | Error msg -> Error (Printf.sprintf "manifest lookup failed (%s)" msg)
+      | Ok vs ->
+        (match Winget_manifest.pick_max vs with
+         | None -> Error "manifest has no versions"
+         | Some v -> Winget_manifest.hosts_of e.fetch it.value v)
+    in
+    match lookup () with
+    | Error problem -> [ Printf.sprintf "  %s: %s" it.value problem ]
+    | Ok [] -> [ Printf.sprintf "  %s: manifest has no InstallerUrl" it.value ]
+    | Ok hosts ->
+      let hs = String.concat ", " hosts in
+      if it.upstream = ""
+      then
+        [ Printf.sprintf "  %s: serves from %s (no upstream pin: cannot verify)" it.value hs ]
+      else (
+        let prov, _ = Provider.of_upstream it.upstream in
+        let expected = expected_of prov in
+        if List.exists (fun h -> List.exists (host_match (lower h)) expected) hosts
+        then [ Printf.sprintf "  %s: ok (%s)" it.value hs ]
+        else
+          [ Printf.sprintf
+              "  %s: MISMATCH serves from %s, vendor is %s"
+              it.value
+              hs
+              (prov_host prov)
+          ])
+  in
+  let cross =
+    if winget_rows = []
+    then [ "manifest cross-check: no winget rows" ]
+    else "manifest cross-check:" :: List.concat (Proc.par_map8 check_row winget_rows)
+  in
+  Ok (src_lines @ cross)
 ;;
 
 let run_export
@@ -535,7 +620,8 @@ let run_export
       match
         e.fs.write_file
           output
-          (Manifest.to_string { sections; winget_path = ""; warnings = []; sources = [] })
+          (Manifest.to_string
+             { sections; winget_path = ""; warnings = []; sources = []; quarantine = 0 })
       with
       | Error e -> [ "  error: " ^ e ]
       | Ok () ->

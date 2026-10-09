@@ -193,6 +193,7 @@ let test_cert () =
 
 let mkrel tag names =
   { Gh.tag_name = tag
+  ; published_at = ""
   ; assets =
       List.map
         (fun n -> { Gh.name = n; browser_download_url = "https://x/" ^ n; size = 1L })

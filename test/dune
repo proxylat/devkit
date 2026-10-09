@@ -71,3 +71,11 @@
 (test
  (name test_verify)
  (libraries devkit alcotest))
+
+(test
+ (name test_lockfile)
+ (libraries devkit alcotest))
+
+(test
+ (name test_winget_manifest)
+ (libraries devkit alcotest))

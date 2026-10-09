@@ -345,6 +345,7 @@ let build_sections
                ; available_version = inf.available
                ; status = NeedsUpdate
                ; upstream = ""
+               ; quarantine_days = 0
                }
                :: !man_updates))
        ids);
@@ -411,6 +412,7 @@ let build_sections
                  ; available_version = avail
                  ; status = New
                  ; upstream = ""
+                 ; quarantine_days = 0
                  }
                  :: !new_items)))
        ids);
@@ -445,6 +447,7 @@ let build_sections
               ; available_version = ""
               ; status = New
               ; upstream = ""
+              ; quarantine_days = 0
               }
               :: !new_items))
     apps;

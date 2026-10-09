@@ -67,6 +67,30 @@ let signature ?(os = Sys.os_type) ~spawn (path : string) : verdict =
              (if text = "" then "empty" else text))))
 ;;
 
+(** Signer cert thumbprint of [path] for cross-install continuity
+    checks. Non-Windows yields [None]; unsigned files (blank output)
+    and spawn failures yield [None]. Pure observation: never raises,
+    never blocks. *)
+let signer ?(os = Sys.os_type) ~spawn (path : string) : string option =
+  if os <> "Win32"
+  then None
+  else (
+    let cmd =
+      Printf.sprintf
+        "(Get-AuthenticodeSignature -FilePath '%s').SignerCertificate.Thumbprint"
+        (ps_escape path)
+    in
+    match spawn "powershell" [ "-NoProfile"; "-NonInteractive"; "-Command"; cmd ] with
+    | exception _ -> None
+    | out, ok ->
+      if not ok
+      then None
+      else (
+        match String.trim out with
+        | "" -> None
+        | thumb -> Some thumb))
+;;
+
 let starts_with (s : string) (prefix : string) : bool =
   String.length s >= String.length prefix
   && String.sub s 0 (String.length prefix) = prefix
@@ -145,6 +169,45 @@ let checksum
           (match Hash.verify_file (Hash.Hex hex) path with
            | Ok () -> Pass
            | Error e -> Block (Printf.sprintf "%s: %s" asset e))))
+;;
+
+(** Sigstore attestation via the gh CLI (GitHub repos only; the caller
+    filters providers). gh is opt-in by installation: a missing gh
+    passes silently, and this function NEVER blocks — offline or
+    network failures must not brick installs, so every failure mode
+    below [Pass] is a [Warn]. *)
+let attestation ?(os = Sys.os_type) ~spawn ~(repo : string) (path : string) : verdict =
+  let probe_prog, probe_args =
+    if os = "Win32" then "where", [ "gh" ] else "command", [ "-v"; "gh" ]
+  in
+  let present =
+    match spawn probe_prog probe_args with
+    | exception _ -> false
+    | out, ok -> ok && String.trim out <> ""
+  in
+  if not present
+  then Pass
+  else (
+    let base = Filename.basename path in
+    match spawn "gh" [ "attestation"; "verify"; path; "--repo"; repo ] with
+    | exception e ->
+      Warn
+        (Printf.sprintf
+           "%s: attestation check inconclusive (%s)"
+           base
+           (Printexc.to_string e))
+    | out, ok ->
+      if ok
+      then Pass
+      else if Strutil.contains_substring "no attestation" (String.lowercase_ascii out)
+      then Warn (Printf.sprintf "%s: no Sigstore attestation published for %s" base repo)
+      else (
+        let text = String.trim out in
+        Warn
+          (Printf.sprintf
+             "%s: attestation check inconclusive (%s)"
+             base
+             (if text = "" then "no output" else text))))
 ;;
 
 (** Delete a blocked download and its temp dir, ignoring errors

@@ -8,6 +8,7 @@ type asset =
 
 type release =
   { tag_name : string
+  ; published_at : string (** ISO-8601 release timestamp; "" when the API omits it *)
   ; assets : asset list
   }
 

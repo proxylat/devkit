@@ -95,10 +95,11 @@ let parse () =
   (match
      Provider.parse
        (Provider.GitLab "gitlab.com")
-       {|[{"tag_name": "v2.0", "assets": {"links": [{"name": "setup.exe", "url": "https://x/setup.exe"}]}}]|}
+       {|[{"tag_name": "v2.0", "released_at": "2026-01-02T03:04:05Z", "assets": {"links": [{"name": "setup.exe", "url": "https://x/setup.exe"}]}}]|}
    with
    | Ok rel ->
      Alcotest.(check string) "tag" "v2.0" rel.Gh.tag_name;
+     Alcotest.(check string) "published_at" "2026-01-02T03:04:05Z" rel.Gh.published_at;
      Alcotest.(check int) "one link" 1 (List.length rel.Gh.assets);
      Alcotest.(check string)
        "link url"
@@ -159,6 +160,79 @@ let of_upstream () =
     (show (Provider.of_upstream "notaurl"))
 ;;
 
+let tag_exists_hit () =
+  let urls = ref [] in
+  let fetch ?timeout_s url _ =
+    Alcotest.(check (option int)) "15s timeout" (Some 15) timeout_s;
+    urls := url :: !urls;
+    if Strutil.contains_substring "gitlab.com" url
+    then Ok {|{"tag_name": "releases/v1", "assets": {"links": []}}|}
+    else Ok {|{"tag_name": "v1.0", "assets": []}|}
+  in
+  (match Provider.tag_exists fetch Provider.GitHub "o/r" "v1.0" with
+   | Ok true -> ()
+   | Ok false -> Alcotest.fail "github tag should exist"
+   | Error e -> Alcotest.fail ("github tag_exists: " ^ e));
+  (match Provider.tag_exists fetch (Provider.Forgejo "git.example.com") "o/r" "v1.0" with
+   | Ok true -> ()
+   | Ok false -> Alcotest.fail "forgejo tag should exist"
+   | Error e -> Alcotest.fail ("forgejo tag_exists: " ^ e));
+  (match
+     Provider.tag_exists
+       fetch
+       (Provider.GitLab "gitlab.com")
+       "group/sub/proj"
+       "releases/v1"
+   with
+   | Ok true -> ()
+   | Ok false -> Alcotest.fail "gitlab tag should exist"
+   | Error e -> Alcotest.fail ("gitlab tag_exists: " ^ e));
+  Alcotest.(check bool)
+    "github tag url"
+    true
+    (List.mem "https://api.github.com/repos/o/r/releases/tags/v1.0" !urls);
+  Alcotest.(check bool)
+    "forgejo tag url"
+    true
+    (List.mem "https://git.example.com/api/v1/repos/o/r/releases/tags/v1.0" !urls);
+  Alcotest.(check bool)
+    "gitlab tag url encodes slashes"
+    true
+    (List.mem
+       "https://gitlab.com/api/v4/projects/group%2Fsub%2Fproj/releases/releases%2Fv1"
+       !urls)
+;;
+
+let tag_exists_errors () =
+  let not_found ?timeout_s:_ _ _ =
+    Error "curl: (22) The requested URL returned error: 404"
+  in
+  (match Provider.tag_exists not_found Provider.GitHub "o/r" "v1.0" with
+   | Ok false -> ()
+   | Ok true -> Alcotest.fail "404 must read as yanked"
+   | Error e -> Alcotest.fail ("404 must not error: " ^ e));
+  let offline ?timeout_s:_ _ _ =
+    Error "curl: (6) Could not resolve host: api.github.com"
+  in
+  (match Provider.tag_exists offline Provider.GitHub "o/r" "v1.0" with
+   | Error e ->
+     Alcotest.(check bool)
+       "passthrough"
+       true
+       (Strutil.contains_substring "Could not resolve" e)
+   | Ok _ -> Alcotest.fail "non-404 must not read as yanked");
+  let mismatch ?timeout_s:_ _ _ = Ok {|{"tag_name": "v9.9", "assets": []}|} in
+  (match Provider.tag_exists mismatch Provider.GitHub "o/r" "v1.0" with
+   | Ok false -> ()
+   | Ok true -> Alcotest.fail "mismatched tag must be false"
+   | Error e -> Alcotest.fail ("mismatch must not error: " ^ e));
+  let bad ?timeout_s:_ _ _ = Ok "{oops" in
+  match Provider.tag_exists bad Provider.GitHub "o/r" "v1.0" with
+  | Error e ->
+    Alcotest.(check bool) "decode prefix" true (Strutil.contains_substring "decode" e)
+  | Ok _ -> Alcotest.fail "bad body must error"
+;;
+
 let () =
   Alcotest.run
     "provider"
@@ -168,5 +242,9 @@ let () =
     ; "parse", [ Alcotest.test_case "release bodies" `Quick parse ]
     ; "pages", [ Alcotest.test_case "repo pages" `Quick page_url ]
     ; "pins", [ Alcotest.test_case "of_upstream" `Quick of_upstream ]
+    ; ( "tags"
+      , [ Alcotest.test_case "tag hit + urls" `Quick tag_exists_hit
+        ; Alcotest.test_case "404 vs errors" `Quick tag_exists_errors
+        ] )
     ]
 ;;

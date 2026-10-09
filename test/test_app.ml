@@ -156,6 +156,7 @@ let append_groups () =
       ; available_version = ""
       ; status = Manifest.New
       ; upstream = ""
+      ; quarantine_days = 0
       }
     ; { Manifest.typ = Manifest.Winget
       ; value = "Git.Git"
@@ -163,6 +164,7 @@ let append_groups () =
       ; available_version = ""
       ; status = Manifest.New
       ; upstream = ""
+      ; quarantine_days = 0
       }
     ]
   in
@@ -305,6 +307,7 @@ let new_items () =
     ; available_version = ""
     ; status
     ; upstream = ""
+    ; quarantine_days = 0
     }
   in
   let secs =
@@ -403,6 +406,76 @@ let default_empty () =
   Alcotest.(check bool) "names winget" true (contains "winget" s)
 ;;
 
+let doctor_manifest =
+  "winget_path = \"C:\\\\w\\\\winget.exe\"\n\n\
+   [[section]]\n\
+   name = \"tools\"\n\n\
+   [[section.package]]\n\
+   id = \"Git.Git\"\n\
+   upstream = \"git-for-windows/git\"\n\n\
+   [[section.package]]\n\
+   id = \"Evil.App\"\n\
+   upstream = \"owner/repo\"\n\n\
+   [[section.package]]\n\
+   id = \"Plain.App\"\n"
+;;
+
+let doctor_fetch ?timeout_s:_ url _ =
+  if contains "git.yaml" url
+  then Ok "InstallerUrl: https://github.com/git-for-windows/git/releases/x.exe\n"
+  else if contains "evil.yaml" url
+  then Ok "InstallerUrl: https://evil.example.com/x.exe\n"
+  else if contains "plain.yaml" url
+  then Ok "InstallerUrl: https://plain.example.com/x.exe\n"
+  else if contains "/2.0" url
+  then (
+    let dl =
+      if contains "Git/Git" url
+      then "https://x/git.yaml"
+      else if contains "Evil/App" url
+      then "https://x/evil.yaml"
+      else "https://x/plain.yaml"
+    in
+    Ok (Printf.sprintf {|[{"type":"file","name":"x.installer.yaml","download_url":%S}]|} dl))
+  else Ok {|[{"type":"dir","name":"2.0"}]|}
+;;
+
+let doctor_cross_check () =
+  let files = Hashtbl.create 1 in
+  Hashtbl.add files Manifest.filename doctor_manifest;
+  let run prog _ =
+    if prog = "C:\\w\\winget.exe" then Some "Name  Argument\nmsstore  https://x\n" else None
+  in
+  let e = { (env files) with run; fetch = doctor_fetch } in
+  match App.doctor_view e with
+  | Error _ -> Alcotest.fail "expected Ok"
+  | Ok lines ->
+    let body = String.concat "\n" lines in
+    Alcotest.(check bool) "msstore ok" true (contains "msstore present" body);
+    Alcotest.(check bool) "pinned ok" true (contains "Git.Git: ok (github.com)" body);
+    Alcotest.(check bool)
+      "mismatch flagged"
+      true
+      (contains "Evil.App: MISMATCH serves from evil.example.com, vendor is github.com" body);
+    Alcotest.(check bool)
+      "unpinned noted"
+      true
+      (contains "Plain.App: serves from plain.example.com (no upstream pin" body)
+;;
+
+let doctor_no_winget () =
+  let e = env (Hashtbl.create 1) in
+  match App.doctor_view e with
+  | Error _ -> Alcotest.fail "expected Ok"
+  | Ok lines ->
+    let body = String.concat "\n" lines in
+    Alcotest.(check bool)
+      "hygiene skipped"
+      true
+      (contains "winget unavailable (skipped)" body);
+    Alcotest.(check bool) "no rows" true (contains "no winget rows" body)
+;;
+
 let () =
   Alcotest.run
     "app"
@@ -433,6 +506,8 @@ let () =
         ; Alcotest.test_case "export registry note" `Quick export_registry_note
         ; Alcotest.test_case "scan error" `Quick scan_error
         ; Alcotest.test_case "default empty" `Quick default_empty
+        ; Alcotest.test_case "doctor cross-check" `Quick doctor_cross_check
+        ; Alcotest.test_case "doctor no winget" `Quick doctor_no_winget
         ] )
     ]
 ;;

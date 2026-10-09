@@ -17,9 +17,11 @@ val upstream_updates : Fetch.fetch -> Manifest.item list -> (string * string) li
 
 (** Group Installed Pm items by manager and check each group; pinned
     rows check the vendor tag instead. Returns [(value, available)]
-    sorted and deduplicated. *)
+    sorted and deduplicated, plus yank warnings for locked tags that
+    no longer exist upstream. *)
 val check_all
   :  run:Proc.runner
   -> fetch:Fetch.fetch
+  -> ?lock:Lockfile.t
   -> Manifest.item list
-  -> (string * string) list
+  -> (string * string) list * string list

@@ -109,3 +109,40 @@ let canon_repo (s : string) : string =
      | owner :: repo :: _ -> owner ^ "/" ^ strip_git repo
      | _ -> s)
 ;;
+
+(** [parse_iso_date] reads the YYYY-MM-DD prefix of an ISO timestamp
+    (date-only strings work too); strict digits, month 1-12, day 1-31. *)
+let parse_iso_date (s : string) : (int * int * int) option =
+  let is_digit c = '0' <= c && c <= '9' in
+  if String.length s < 10 || s.[4] <> '-' || s.[7] <> '-'
+  then None
+  else (
+    let y = String.sub s 0 4
+    and m = String.sub s 5 2
+    and d = String.sub s 8 2 in
+    if not (String.for_all is_digit (y ^ m ^ d))
+    then None
+    else (
+      let y = int_of_string y
+      and m = int_of_string m
+      and d = int_of_string d in
+      if m < 1 || m > 12 || d < 1 || d > 31 then None else Some (y, m, d)))
+;;
+
+(** Howard Hinnant days_from_civil, epoch 1970-01-01. Years here are
+    non-negative, so truncating division is exact. *)
+let days_from_civil (y : int) (m : int) (d : int) : int =
+  let y = if m <= 2 then y - 1 else y in
+  let era = (if y >= 0 then y else y - 399) / 400 in
+  let yoe = y - (era * 400) in
+  let mp = if m > 2 then m - 3 else m + 9 in
+  let doy = (((153 * mp) + 2) / 5) + d - 1 in
+  let doe = (yoe * 365) + (yoe / 4) - (yoe / 100) + doy in
+  (era * 146097) + doe - 719468
+;;
+
+let days_between (earlier : int * int * int) (later : int * int * int) : int =
+  let y1, m1, d1 = earlier
+  and y2, m2, d2 = later in
+  days_from_civil y2 m2 d2 - days_from_civil y1 m1 d1
+;;

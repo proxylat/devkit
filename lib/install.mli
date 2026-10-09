@@ -25,6 +25,8 @@ type deps =
   ; download : url:string -> (string, string) result
   ; fetch : Fetch.fetch
   ; run_installer : string -> (unit, string) result
+  ; lock_load : unit -> Lockfile.t
+  ; lock_save : Lockfile.t -> unit
   ; tools : Plugin.tool list
   }
 
@@ -45,15 +47,25 @@ val real_open_browser : ?os:string -> Bootstrap.spawn -> string -> (unit, string
     [host] carries the self-hosted forge host for gitlab/forgejo rows.
     [os] selects the platform for the Authenticode check (Win32 only).
     Vendor-direct downloads are signature- and checksum-verified per
-    SecDoc; soft findings ride [warnings], blocks are [Failed]. *)
+    SecDoc; soft findings ride [warnings], blocks are [Failed].
+    [quarantine_days] refuses releases younger than that many days.
+    Successful vendor installs record tag, digest, and signer via
+    [lock_save]; a re-cut tag fails the next install. *)
 val install
   :  deps
   -> ?upstream:string
   -> ?host:string
   -> ?os:string
+  -> ?quarantine_days:int
   -> string
   -> string
   -> bool
   -> outcome
 
-val real_deps : Fetch.fetch -> winget_override:string -> unit -> deps
+val real_deps
+  :  Fetch.fetch
+  -> winget_override:string
+  -> read_file:(string -> (string, string) result)
+  -> write_file:(string -> string -> (unit, string) result)
+  -> unit
+  -> deps

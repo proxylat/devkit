@@ -12,6 +12,23 @@ type verdict =
     warns with the raw text. *)
 val signature : ?os:string -> spawn:Bootstrap.spawn -> string -> verdict
 
+(** Authenticode signer cert thumbprint of [path] via PowerShell.
+    Win32 only ([?os] defaults to [Sys.os_type]); other OSes yield
+    [None]. Blank output (unsigned) and spawn failures yield [None].
+    Pure observation for continuity checks: never raises, never
+    blocks. *)
+val signer : ?os:string -> spawn:Bootstrap.spawn -> string -> string option
+
+(** Sigstore attestation of [path] via [gh attestation verify --repo
+    repo] (GitHub repos only; the caller filters providers).
+    [?os] (default [Sys.os_type]) picks the gh probe: [where gh] on
+    Win32, [command -v gh] elsewhere. A missing gh passes silently
+    (opt-in by installation); a failed verify warns — naming [repo]
+    when no attestation was published, quoting the raw output
+    otherwise. NEVER blocks: offline/network failures must not brick
+    installs. *)
+val attestation : ?os:string -> spawn:Bootstrap.spawn -> repo:string -> string -> verdict
+
 (** Release checksum-file names: [SHA256SUMS*], [*checksums*.txt],
     [*.sha256], case-insensitive. *)
 val is_checksum_file : string -> bool

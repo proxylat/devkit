@@ -141,12 +141,59 @@ let upstream_updates (fetch : Fetch.fetch) (items : item list) : (string * strin
   List.filter_map Fun.id (Proc.par_map8 one items)
 ;;
 
+(** Yank detection: a locked tag that no longer exists upstream means
+    the vendor pulled the release. Only rows with a derivable provider
+    (pinned, or forge-kind) are probed, in parallel; network failures
+    stay silent — unreachable is not yanked. *)
+let yank_warns (fetch : Fetch.fetch) (lock : Lockfile.t) (items : item list)
+  : string list
+  =
+  let prov_of (it : item) =
+    if it.upstream <> ""
+    then Some (Provider.of_upstream it.upstream)
+    else (
+      match it.typ with
+      | GitHub -> Some (Provider.GitHub, it.value)
+      | GitLab h -> Some (Provider.GitLab h, it.value)
+      | Forgejo h -> Some (Provider.Forgejo h, it.value)
+      | _ -> None)
+  in
+  let one (it : item) =
+    match prov_of it with
+    | None -> None
+    | Some (prov, repo) ->
+      (match Lockfile.find lock it.value with
+       | None -> None
+       | Some e ->
+         (match Provider.tag_exists fetch prov repo e.Lockfile.tag with
+          | Ok false ->
+            let host =
+              match prov with
+              | Provider.GitHub -> "github.com"
+              | Provider.GitLab h | Provider.Forgejo h -> h
+            in
+            Some
+              (Printf.sprintf
+                 "release yanked: %s tag %s no longer on %s"
+                 it.value
+                 e.Lockfile.tag
+                 host)
+          | _ -> None))
+  in
+  List.filter_map Fun.id (Proc.par_map8 one items)
+;;
+
 (** Group Installed Pm items by manager: npm via [outdated], pipx and
     uv via PyPI, cargo via crates.io. Pinned rows of any kind check
     the vendor tag instead of their registry. Anything else (winget,
-    links, unknown Pms, non-Installed rows) is ignored. *)
-let check_all ~(run : Proc.runner) ~(fetch : Fetch.fetch) (items : item list)
-  : (string * string) list
+    links, unknown Pms, non-Installed rows) is ignored. The yank pass
+    warns for locked tags that no longer exist upstream. *)
+let check_all
+      ~(run : Proc.runner)
+      ~(fetch : Fetch.fetch)
+      ?(lock : Lockfile.t = [])
+      (items : item list)
+  : (string * string) list * string list
   =
   let pinned, rest = List.partition (fun it -> it.upstream <> "") items in
   let installed =
@@ -165,5 +212,6 @@ let check_all ~(run : Proc.runner) ~(fetch : Fetch.fetch) (items : item list)
   let pypi = pypi_updates fetch (of_pm "pipx" @ of_pm "uv") in
   let cargo = cargo_updates fetch (of_pm "cargo") in
   let pinned = upstream_updates fetch pinned in
-  List.sort_uniq compare (npm @ pypi @ cargo @ pinned)
+  let updates = List.sort_uniq compare (npm @ pypi @ cargo @ pinned) in
+  updates, yank_warns fetch lock items
 ;;

@@ -11,6 +11,7 @@ type asset =
 
 type release =
   { tag_name : string
+  ; published_at : string
   ; assets : asset list
   }
 
@@ -31,6 +32,8 @@ let asset_of_yojson (j : Yojson.Basic.t) : asset =
 let release_of_yojson (j : Yojson.Basic.t) : release =
   let open Yojson.Basic.Util in
   { tag_name = j |> member "tag_name" |> to_string_option |> Option.value ~default:""
+  ; published_at =
+      j |> member "published_at" |> to_string_option |> Option.value ~default:""
   ; assets = j |> member "assets" |> to_list |> List.map asset_of_yojson
   }
 ;;

@@ -10,6 +10,8 @@ let base_deps
       ?(download = fun ~url:_ -> Error "no net")
       ?(fetch = fun ?timeout_s:_ _ _ -> Error "no net")
       ?(installer = fun _ -> Ok ())
+      ?(lock = [])
+      ?(lock_saved = ref [])
       ?(tools = [])
       ()
   : Install.deps
@@ -21,6 +23,8 @@ let base_deps
   ; download
   ; fetch
   ; run_installer = installer
+  ; lock_load = (fun () -> lock)
+  ; lock_save = (fun t -> lock_saved := t)
   ; tools
   }
 ;;
@@ -128,17 +132,18 @@ let win_asset =
   { Gh.name = "Tool-win-x64.exe"; browser_download_url = "https://x/tool.exe"; size = 1L }
 ;;
 
-let win_release = { Gh.tag_name = "v1"; assets = win_asset :: [] }
+let win_release = { Gh.tag_name = "v1"; published_at = ""; assets = win_asset :: [] }
 
 let test_winget_upstream_install () =
   (* Upstream rows download the vendor asset; winget never spawns, and
-     the outcome still carries the winget id for row matching. *)
-  let spawned = ref false in
+     the outcome still carries the winget id for row matching. Other
+     spawns (attestation probe) are fine. *)
+  let progs = ref [] in
   let got_url = ref "" in
   let d =
     base_deps
-      ~spawn:(fun _ _ ->
-        spawned := true;
+      ~spawn:(fun prog _ ->
+        progs := prog :: !progs;
         "", true)
       ~latest:(fun _ repo ->
         Alcotest.(check string) "repo" "owner/tool" repo;
@@ -149,7 +154,7 @@ let test_winget_upstream_install () =
       ()
   in
   let r = Install.install ~upstream:"owner/tool" d "winget" "Foo.Bar" false in
-  Alcotest.(check bool) "winget never spawned" false !spawned;
+  Alcotest.(check bool) "winget never spawned" false (List.mem "C:\\w\\winget.exe" !progs);
   Alcotest.(check string) "asset url" "https://x/tool.exe" !got_url;
   Alcotest.(check string) "winget id kept" "Foo.Bar" r.Install.value;
   Alcotest.(check bool) "installed" true (r.Install.status = Install.Installed)
@@ -169,12 +174,13 @@ let test_winget_upstream_update () =
 
 let test_pm_upstream_update () =
   (* Pinned plugin rows take the vendor asset path; no PM command
-     spawns, and the outcome keeps the manifest value for matching. *)
-  let spawned = ref false in
+     spawns, and the outcome keeps the manifest value for matching.
+     Other spawns (attestation probe) are fine. *)
+  let progs = ref [] in
   let d =
     base_deps
-      ~spawn:(fun _ _ ->
-        spawned := true;
+      ~spawn:(fun prog _ ->
+        progs := prog :: !progs;
         "", true)
       ~latest:(fun _ repo ->
         Alcotest.(check string) "repo" "owner/tool" repo;
@@ -183,7 +189,7 @@ let test_pm_upstream_update () =
       ()
   in
   let r = Install.install ~upstream:"owner/tool" d "npm" "some-tool" true in
-  Alcotest.(check bool) "pm never spawned" false !spawned;
+  Alcotest.(check bool) "pm never spawned" false (List.mem "npm" !progs);
   Alcotest.(check string) "value kept" "some-tool" r.Install.value;
   Alcotest.(check bool) "updated" true (r.Install.status = Install.Updated)
 ;;
@@ -228,7 +234,7 @@ let test_github_no_asset_opens_page () =
   let opened = ref "" in
   let d =
     base_deps
-      ~latest:(fun _ _ -> Ok { Gh.tag_name = "v1"; assets = [] })
+      ~latest:(fun _ _ -> Ok { Gh.tag_name = "v1"; published_at = ""; assets = [] })
       ~browser:(fun url ->
         opened := url;
         Ok ())
@@ -434,7 +440,7 @@ let test_gitlab_no_asset_opens_page () =
   let opened = ref "" in
   let d =
     base_deps
-      ~latest:(fun _ _ -> Ok { Gh.tag_name = "v1"; assets = [] })
+      ~latest:(fun _ _ -> Ok { Gh.tag_name = "v1"; published_at = ""; assets = [] })
       ~browser:(fun url ->
         opened := url;
         Ok ())
@@ -560,6 +566,95 @@ let test_verify_sum_block_deletes () =
   Alcotest.(check bool) "download deleted" false (Sys.file_exists !path)
 ;;
 
+let test_lock_records_entry () =
+  let download, path = real_download () in
+  let saved = ref [] in
+  let d =
+    base_deps ~latest:(fun _ _ -> Ok win_release) ~download ~lock_saved:saved ()
+  in
+  let r = Install.install d "github" "owner/tool" false in
+  Alcotest.(check bool) "installed" true (r.Install.status = Install.Installed);
+  (match Lockfile.find !saved "owner/tool" with
+   | None -> Alcotest.fail "expected lock entry"
+   | Some e ->
+     Alcotest.(check string) "tag" "v1" e.Lockfile.tag;
+     let sha =
+       match Hash.sha256_file !path with
+       | Ok s -> s
+       | Error _ -> Alcotest.fail "sha of download"
+     in
+     Alcotest.(check string) "sha" sha e.Lockfile.sha256;
+     Alcotest.(check string) "host" "github.com" e.Lockfile.host);
+  (try Sys.remove !path with
+   | _ -> ())
+;;
+
+let test_lock_blocks_recut_tag () =
+  let download, path = real_download () in
+  let lock =
+    Lockfile.
+      [ { id = "owner/tool"
+        ; tag = "v1"
+        ; sha256 = String.make 64 '0'
+        ; thumbprint = ""
+        ; host = ""
+        }
+      ]
+  in
+  let ran = ref false in
+  let d =
+    base_deps
+      ~latest:(fun _ _ -> Ok win_release)
+      ~download
+      ~lock
+      ~installer:(fun _ ->
+        ran := true;
+        Ok ())
+      ()
+  in
+  let r = Install.install d "github" "owner/tool" false in
+  (match r.Install.status with
+   | Install.Failed m ->
+     Alcotest.(check bool)
+       "names re-cut"
+       true
+       (Strutil.contains_substring "changed bytes" m)
+   | _ -> Alcotest.fail "expected Failed");
+  Alcotest.(check bool) "download deleted" false (Sys.file_exists !path);
+  Alcotest.(check bool) "installer never ran" false !ran
+;;
+
+let test_quarantine_blocks_young () =
+  let rel = { win_release with Gh.published_at = "2999-01-01T00:00:00Z" } in
+  let downloaded = ref false in
+  let d =
+    base_deps
+      ~latest:(fun _ _ -> Ok rel)
+      ~download:(fun ~url:_ ->
+        downloaded := true;
+        Ok "/tmp/tool.exe")
+      ()
+  in
+  let r = Install.install ~quarantine_days:5 d "github" "owner/tool" false in
+  (match r.Install.status with
+   | Install.Failed m ->
+     Alcotest.(check bool)
+       "quarantined"
+       true
+       (Strutil.contains_substring "quarantined" m)
+   | _ -> Alcotest.fail "expected Failed");
+  Alcotest.(check bool) "no download" false !downloaded
+;;
+
+let test_quarantine_old_proceeds () =
+  let rel = { win_release with Gh.published_at = "2020-01-01T00:00:00Z" } in
+  let d =
+    base_deps ~latest:(fun _ _ -> Ok rel) ~download:(fun ~url:_ -> Ok "/tmp/tool.exe") ()
+  in
+  let r = Install.install ~quarantine_days:5 d "github" "owner/tool" false in
+  Alcotest.(check bool) "installed" true (r.Install.status = Install.Installed)
+;;
+
 let () =
   Alcotest.run
     "install"
@@ -603,6 +698,12 @@ let () =
       , [ Alcotest.test_case "sig block deletes" `Quick test_verify_sig_block_deletes
         ; Alcotest.test_case "sig warn proceeds" `Quick test_verify_sig_warn_proceeds
         ; Alcotest.test_case "sum block deletes" `Quick test_verify_sum_block_deletes
+        ] )
+    ; ( "lock"
+      , [ Alcotest.test_case "records entry" `Quick test_lock_records_entry
+        ; Alcotest.test_case "re-cut tag blocked" `Quick test_lock_blocks_recut_tag
+        ; Alcotest.test_case "young quarantined" `Quick test_quarantine_blocks_young
+        ; Alcotest.test_case "old proceeds" `Quick test_quarantine_old_proceeds
         ] )
     ; ( "plugin"
       , [ Alcotest.test_case "install happy" `Quick test_plugin_install_happy

@@ -4,6 +4,7 @@ open Devkit
 let release_json =
   {|{
     "tag_name": "v2.1.0",
+    "published_at": "2026-10-05T12:34:56Z",
     "assets": [
       {"name": "tool-linux.tar.gz", "browser_download_url": "https://x/lin", "size": 10},
       {"name": "Tool-win-x64.exe", "browser_download_url": "https://x/win", "size": 20},
@@ -17,10 +18,19 @@ let test_parse () =
   | Error e -> Alcotest.fail ("parse: " ^ e)
   | Ok rel ->
     Alcotest.(check string) "tag" "v2.1.0" rel.Gh.tag_name;
+    Alcotest.(check string) "published_at" "2026-10-05T12:34:56Z" rel.Gh.published_at;
     Alcotest.(check int) "assets" 3 (List.length rel.Gh.assets);
     let msi = List.nth rel.Gh.assets 2 in
     Alcotest.(check string) "msi url" "https://x/msi" msi.Gh.browser_download_url;
     Alcotest.(check int64) "missing size defaults 0" 0L msi.Gh.size
+;;
+
+let test_parse_no_published () =
+  match Gh.parse_release {|{"tag_name": "v1.0", "assets": []}|} with
+  | Error e -> Alcotest.fail ("parse: " ^ e)
+  | Ok rel ->
+    Alcotest.(check string) "tag" "v1.0" rel.Gh.tag_name;
+    Alcotest.(check string) "missing published_at defaults empty" "" rel.Gh.published_at
 ;;
 
 let test_parse_bad () =
@@ -64,6 +74,7 @@ let () =
     "gh"
     [ ( "parse"
       , [ Alcotest.test_case "release json" `Quick test_parse
+        ; Alcotest.test_case "missing published_at" `Quick test_parse_no_published
         ; Alcotest.test_case "bad json errors" `Quick test_parse_bad
         ] )
     ; ( "match_by_arch"

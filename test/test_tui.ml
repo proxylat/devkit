@@ -7,6 +7,7 @@ let item status value =
   ; available_version = ""
   ; status
   ; upstream = ""
+  ; quarantine_days = 0
   }
 ;;
 
@@ -70,6 +71,7 @@ let litem typ status value =
   ; available_version = ""
   ; status
   ; upstream = ""
+  ; quarantine_days = 0
   }
 ;;
 
@@ -218,6 +220,13 @@ let apply_warns_logged () =
     s.Tui.message
 ;;
 
+let log_lines_appends () =
+  let s = Tui.make (sections ()) ~height:10 ~width:80 in
+  let s = Tui.log_lines s [ "w1"; "w2" ] in
+  Alcotest.(check (list string)) "appended" [ "w1"; "w2" ] s.Tui.log;
+  Alcotest.(check (option string)) "footer untouched" None s.Tui.message
+;;
+
 let frame_shape () =
   let s = Tui.make (sections ()) ~height:10 ~width:80 in
   let f = Tui.frame s in
@@ -348,6 +357,7 @@ let () =
       , [ Alcotest.test_case "success" `Quick apply_success
         ; Alcotest.test_case "failure keeps" `Quick apply_failure_keeps
         ; Alcotest.test_case "warns logged" `Quick apply_warns_logged
+        ; Alcotest.test_case "log lines" `Quick log_lines_appends
         ; Alcotest.test_case "failure logs reason" `Quick apply_failure_logs_reason
         ; Alcotest.test_case "open keeps status" `Quick open_keeps_status
         ; Alcotest.test_case "end state green" `Quick apply_to_sections_reflects_session

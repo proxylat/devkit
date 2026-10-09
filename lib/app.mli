@@ -47,6 +47,10 @@ val append_selected : fs -> string -> Manifest.item list -> (unit, string) resul
 val new_items : ?extra:bool -> Manifest.section list -> Manifest.item list
 val run_add : env -> ?tools:Plugin.tool list -> string list -> string list
 
+(** Winget supply-chain hygiene: configured sources plus a per-row
+    manifest-InstallerUrl vs upstream-vendor cross-check. *)
+val doctor_view : env -> (string list, string) result
+
 val run_append
   :  env
   -> ?tools:Plugin.tool list

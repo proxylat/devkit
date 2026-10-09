@@ -113,9 +113,10 @@ let check_all_routes () =
     ; { (make_item GitHub "o/t") with status = Manual }
     ]
   in
-  let got = Update.check_all ~run ~fetch items in
+  let got, warns = Update.check_all ~run ~fetch items in
   Alcotest.(check int) "npm once" 1 !run_calls;
   Alcotest.(check int) "three registry hits" 3 (List.length !fetch_calls);
+  Alcotest.(check (list string)) "no yanks" [] warns;
   Alcotest.(check (list (pair string string)))
     "updates"
     [ "black", "9.9"; "ripgrep", "9.9"; "ruff", "9.9" ]
@@ -230,7 +231,8 @@ let check_all_pins_skip_registry () =
   let items =
     [ { (inst "npm" "typescript" "5.3.3") with upstream = "microsoft/TypeScript" } ]
   in
-  let got = Update.check_all ~run ~fetch items in
+  let got, warns = Update.check_all ~run ~fetch items in
+  Alcotest.(check (list string)) "no yanks" [] warns;
   Alcotest.(check (list (pair string string))) "tag update" [ "typescript", "v9.9" ] got;
   Alcotest.(check bool)
     "github api hit"
@@ -238,6 +240,37 @@ let check_all_pins_skip_registry () =
     (List.exists
        (fun u -> Strutil.contains_substring "api.github.com/repos/microsoft/TypeScript" u)
        !urls)
+;;
+
+let yank_warns_on_retagged () =
+  (* Locked tag v1.0, upstream serves v2.0: the row updates AND warns. *)
+  let run _ _ = Alcotest.fail "registry must not run for pinned rows" in
+  let fetch ?timeout_s:_ _ _ = Ok {|{"tag_name": "v2.0", "assets": []}|} in
+  let lock =
+    Lockfile.[ { id = "a"; tag = "v1.0"; sha256 = ""; thumbprint = ""; host = "" } ]
+  in
+  let got, warns =
+    Update.check_all ~run ~fetch ~lock [ pin "a" "owner/tool" "1.0" Installed ]
+  in
+  Alcotest.(check (list (pair string string))) "update listed" [ "a", "v2.0" ] got;
+  Alcotest.(check (list string))
+    "yank warned"
+    [ "release yanked: a tag v1.0 no longer on github.com" ]
+    warns
+;;
+
+let yank_fetch_error_silent () =
+  (* Unreachable is not yanked: no update, no warn. *)
+  let run _ _ = Alcotest.fail "registry must not run for pinned rows" in
+  let fetch ?timeout_s:_ _ _ = Error "boom" in
+  let lock =
+    Lockfile.[ { id = "a"; tag = "v1.0"; sha256 = ""; thumbprint = ""; host = "" } ]
+  in
+  let got, warns =
+    Update.check_all ~run ~fetch ~lock [ pin "a" "owner/tool" "1.0" Installed ]
+  in
+  Alcotest.(check (list (pair string string))) "no update" [] got;
+  Alcotest.(check (list string)) "no warn" [] warns
 ;;
 
 let () =
@@ -261,6 +294,8 @@ let () =
             "check_all skips registry"
             `Quick
             check_all_pins_skip_registry
+        ; Alcotest.test_case "yank warns" `Quick yank_warns_on_retagged
+        ; Alcotest.test_case "yank error silent" `Quick yank_fetch_error_silent
         ] )
     ; ( "tui"
       , [ Alcotest.test_case "apply marks" `Quick apply_updates_marks

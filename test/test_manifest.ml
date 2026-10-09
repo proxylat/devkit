@@ -219,6 +219,131 @@ let round_trip () =
   Alcotest.(check (list string)) "upstream survives" (ups r.sections) (ups r2.sections)
 ;;
 
+let quarantine () =
+  let items text = (parse text).sections |> List.concat_map (fun s -> s.items) in
+  (* Global resolves into every row. *)
+  let r =
+    parse
+      "quarantine_days = 7\n\n\
+       [[section]]\n\
+       name = \"t\"\n\n\
+       [[section.package]]\n\
+       id = \"Git.Git\"\n\n\
+       [[section.package]]\n\
+       id = \"owner/repo\"\n"
+  in
+  Alcotest.(check int) "global" 7 r.quarantine;
+  (match r.sections with
+   | [ sec ] ->
+     (match sec.items with
+      | [ a; b ] ->
+        Alcotest.(check int) "row inherits" 7 a.quarantine_days;
+        Alcotest.(check int) "row inherits" 7 b.quarantine_days
+      | _ -> Alcotest.fail "expected two items")
+   | _ -> Alcotest.fail "expected one section");
+  (* Per-row override wins, including an explicit 0. *)
+  let got =
+    items
+      "quarantine_days = 7\n\n\
+       [[section]]\n\
+       name = \"t\"\n\n\
+       [[section.package]]\n\
+       id = \"Git.Git\"\n\
+       quarantine_days = 3\n\n\
+       [[section.package]]\n\
+       id = \"owner/repo\"\n\
+       quarantine_days = 0\n"
+  in
+  (match got with
+   | [ a; b ] ->
+     Alcotest.(check int) "override wins" 3 a.quarantine_days;
+     Alcotest.(check int) "explicit zero wins" 0 b.quarantine_days
+   | _ -> Alcotest.fail "expected two items");
+  (* Override without a global. *)
+  (match
+     items
+       "[[section]]\n\
+        name = \"t\"\n\n\
+        [[section.package]]\n\
+        id = \"Git.Git\"\n\
+        quarantine_days = 5\n"
+   with
+   | [ a ] -> Alcotest.(check int) "row only" 5 a.quarantine_days
+   | _ -> Alcotest.fail "expected one item");
+  (* Absent everywhere means 0. *)
+  (match items "[[section]]\nname = \"t\"\n\n[[section.package]]\nid = \"Git.Git\"\n" with
+   | [ a ] -> Alcotest.(check int) "default off" 0 a.quarantine_days
+   | _ -> Alcotest.fail "expected one item");
+  (* Negatives clamp to 0. *)
+  let rneg =
+    parse
+      "quarantine_days = -2\n\n\
+       [[section]]\n\
+       name = \"t\"\n\n\
+       [[section.package]]\n\
+       id = \"Git.Git\"\n\
+       quarantine_days = -9\n"
+  in
+  Alcotest.(check int) "global clamps" 0 rneg.quarantine;
+  (match rneg.sections with
+   | [ sec ] ->
+     (match sec.items with
+      | [ a ] -> Alcotest.(check int) "row clamps" 0 a.quarantine_days
+      | _ -> Alcotest.fail "expected one item")
+   | _ -> Alcotest.fail "expected one section");
+  (* Non-int keys are ignored like other malformed keys. *)
+  let rstr =
+    parse
+      "quarantine_days = \"soon\"\n\n\
+       [[section]]\n\
+       name = \"t\"\n\n\
+       [[section.package]]\n\
+       id = \"Git.Git\"\n\
+       quarantine_days = \"many\"\n"
+  in
+  Alcotest.(check int) "global non-int ignored" 0 rstr.quarantine;
+  match rstr.sections with
+  | [ sec ] ->
+    (match sec.items with
+     | [ a ] -> Alcotest.(check int) "row non-int ignored" 0 a.quarantine_days
+     | _ -> Alcotest.fail "expected one item")
+  | _ -> Alcotest.fail "expected one section"
+;;
+
+let quarantine_round_trip () =
+  let r =
+    parse
+      "quarantine_days = 7\n\n\
+       [[section]]\n\
+       name = \"t\"\n\n\
+       [[section.package]]\n\
+       id = \"Git.Git\"\n\
+       quarantine_days = 3\n\n\
+       [[section.package]]\n\
+       id = \"owner/repo\"\n"
+  in
+  let text = to_string r in
+  Alcotest.(check bool) "global emitted" true (contains "quarantine_days = 7" text);
+  Alcotest.(check bool) "row emitted" true (contains "quarantine_days = 3" text);
+  let r2 = parse text in
+  Alcotest.(check int) "global survives" 7 r2.quarantine;
+  (match r2.sections with
+   | [ sec ] ->
+     (match sec.items with
+      | [ a; b ] ->
+        (* The inheriting row was emitted with its resolved 7, so it
+           re-parses explicit with the same value. *)
+        Alcotest.(check int) "override survives" 3 a.quarantine_days;
+        Alcotest.(check int) "inherited value survives" 7 b.quarantine_days
+      | _ -> Alcotest.fail "expected two items")
+   | _ -> Alcotest.fail "expected one section");
+  (* Zero means no key at all. *)
+  let plain =
+    parse "[[section]]\nname = \"t\"\n\n[[section.package]]\nid = \"Git.Git\"\n"
+  in
+  Alcotest.(check bool) "zero not emitted" false (contains "quarantine" (to_string plain))
+;;
+
 let () =
   Alcotest.run
     "manifest"
@@ -230,7 +355,11 @@ let () =
         ; Alcotest.test_case "skips" `Quick skips
         ; Alcotest.test_case "malformed" `Quick malformed
         ; Alcotest.test_case "sources" `Quick sources
+        ; Alcotest.test_case "quarantine" `Quick quarantine
         ] )
-    ; "render", [ Alcotest.test_case "round_trip" `Quick round_trip ]
+    ; ( "render"
+      , [ Alcotest.test_case "round_trip" `Quick round_trip
+        ; Alcotest.test_case "quarantine round_trip" `Quick quarantine_round_trip
+        ] )
     ]
 ;;

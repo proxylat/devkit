@@ -15,3 +15,11 @@ val is_newer_version : string -> string -> bool
     page, deep link, or clone URL — and returns the canonical [owner/repo].
     Anything unrecognized is returned unchanged. *)
 val canon_repo : string -> string
+
+(** [parse_iso_date "2026-10-05T12:34:56Z"] = [Some (2026,10,5)]. Reads
+    the YYYY-MM-DD prefix; [None] unless month 1-12 and day 1-31. *)
+val parse_iso_date : string -> (int * int * int) option
+
+(** [days_between earlier later] = later minus earlier in days (Howard
+    Hinnant days_from_civil). May be negative. *)
+val days_between : int * int * int -> int * int * int -> int

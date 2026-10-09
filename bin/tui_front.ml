@@ -123,6 +123,7 @@ let press_enter ~draw (deps : Install.deps) (st : Tui.state) : Tui.state Lwt.t =
             deps
             ~upstream:item.Manifest.upstream
             ~host:(host_of item.Manifest.typ)
+            ~quarantine_days:item.Manifest.quarantine_days
             (kind_of item.Manifest.typ)
             item.Manifest.value
             update))
@@ -141,16 +142,19 @@ let press_enter ~draw (deps : Install.deps) (st : Tui.state) : Tui.state Lwt.t =
 let viewport (w : int) (h : int) : int * int = max 1 w, max 1 (h - 3)
 
 (** [u]: check npm/pipx/uv/cargo updates for the Installed rows, then
-    mark the hits. Paints a status line first, then runs synchronously
-    like installs (UI freezes). *)
-let press_u ~draw (run : Proc.runner) (fetch : Fetch.fetch) (st : Tui.state)
+    mark the hits. Yank warnings ride the log, not the footer. Paints a
+    status line first, then runs synchronously like installs (UI freezes). *)
+let press_u ~draw (run : Proc.runner) (fetch : Fetch.fetch) (load_lock : unit -> Lockfile.t)
+      (st : Tui.state)
   : Tui.state Lwt.t
   =
   let items = List.map (fun e -> e.Tui.item) st.Tui.entries in
   draw (Tui.set_message st "checking updates ...")
   >>= fun () ->
   Lwt.pause ()
-  >>= fun () -> Lwt.return (Tui.apply_updates st (Update.check_all ~run ~fetch items))
+  >>= fun () ->
+  let updates, warns = Update.check_all ~run ~fetch ~lock:(load_lock ()) items in
+  Lwt.return (Tui.log_lines (Tui.apply_updates st updates) warns)
 ;;
 
 (** Repaint in place, one addressed line at a time: no full-screen
@@ -231,7 +235,7 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
        let vw, vh = viewport geom.LTerm_geom.cols geom.LTerm_geom.rows in
        (* Main loop once the scan lands: draws, then waits. Events that
           change nothing skip the repaint. *)
-       let main_loop deps fetch init =
+       let main_loop deps fetch load_lock init =
          let rec draw_loop (st : Tui.state) : Tui.state Lwt.t =
            draw_all term st >>= fun () -> wait_loop st
          and wait_loop (st : Tui.state) : Tui.state Lwt.t =
@@ -241,7 +245,7 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
            | Quit -> Lwt.return st
            | Nothing -> wait_loop st
            | Enter -> press_enter ~draw:(draw_all term) deps st >>= draw_loop
-           | Update -> press_u ~draw:(draw_all term) env.App.run fetch st >>= draw_loop
+           | Update -> press_u ~draw:(draw_all term) env.App.run fetch load_lock st >>= draw_loop
            | Action a -> draw_loop (Tui.step st a)
            | Resized g ->
              LTerm.clear_screen term
@@ -269,14 +273,31 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
          >>= function
          | `Scan (dash, s, winget_path) ->
            let fetch = Fetch.curl_fetch Proc.default_runner in
-           let deps = Install.real_deps fetch ~winget_override:winget_path () in
+           let read_file p =
+             match env.App.fs.read_file p with
+             | None -> Error "not found"
+             | Some t -> Ok t
+           in
+           let load_lock () =
+             match env.App.fs.read_file Lockfile.filename with
+             | None -> []
+             | Some t -> Lockfile.parse t
+           in
+           let deps =
+             Install.real_deps
+               fetch
+               ~winget_override:winget_path
+               ~read_file
+               ~write_file:env.App.fs.write_file
+               ()
+           in
            let init = Tui.make dash ~height:st.Tui.height ~width:st.Tui.width in
            let init =
              match empty_scan_message s with
              | None -> init
              | Some m -> Tui.set_message init m
            in
-           main_loop deps fetch init
+           main_loop deps fetch load_lock init
            >>= fun final ->
            cleanup term mode >>= fun () -> Lwt.return (`Done (dash, s, final))
          | `Event ev ->

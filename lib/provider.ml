@@ -246,11 +246,14 @@ let link_asset (j : Yojson.Basic.t) : Gh.asset option =
 let gitlab_of_yojson (j : Yojson.Basic.t) : Gh.release =
   let open Yojson.Basic.Util in
   let tag = j |> member "tag_name" |> to_string_option |> Option.value ~default:"" in
+  let published_at =
+    j |> member "released_at" |> to_string_option |> Option.value ~default:""
+  in
   let links =
     try j |> member "assets" |> member "links" |> to_list with
     | _ -> []
   in
-  { Gh.tag_name = tag; assets = List.filter_map link_asset links }
+  { Gh.tag_name = tag; published_at; assets = List.filter_map link_asset links }
 ;;
 
 let parse (p : t) (body : string) : (Gh.release, string) result =
@@ -267,34 +270,87 @@ let parse (p : t) (body : string) : (Gh.release, string) result =
   | Yojson.Basic.Util.Type_error (msg, _) -> Error ("decode: " ^ msg)
 ;;
 
+(** Shared request headers: forge Accept plus a devkit user agent,
+    [GH_TOKEN] bearer auth to GitHub, [GITLAB_TOKEN] as
+    [PRIVATE-TOKEN] to GitLab; Forgejo-family needs no token for
+    public repos. *)
+let headers_for (p : t) : (string * string) list =
+  (match p with
+   | GitHub -> [ "Accept", "application/vnd.github+json" ]
+   | GitLab _ | Forgejo _ -> [ "Accept", "application/json" ])
+  @ [ "User-Agent", "devkit/1.0" ]
+  @
+  match p with
+  | GitHub ->
+    (match Sys.getenv_opt "GH_TOKEN" with
+     | None | Some "" -> []
+     | Some tok -> [ "Authorization", "Bearer " ^ tok ])
+  | GitLab _ ->
+    (match Sys.getenv_opt "GITLAB_TOKEN" with
+     | None | Some "" -> []
+     | Some tok -> [ "PRIVATE-TOKEN", tok ])
+  | Forgejo _ -> []
+;;
+
+(** Tag lookup URL: the per-tag release endpoint. GitLab encodes the
+    tag ([%2F]) since tags may hold slashes; GitHub/Forgejo take it
+    raw, so slash-tags there are a known limitation. *)
+let tag_url (p : t) (repo : string) (tag : string) : string =
+  let path = path_of_url repo in
+  match p with
+  | GitHub -> Printf.sprintf "https://api.github.com/repos/%s/releases/tags/%s" path tag
+  | GitLab h ->
+    Printf.sprintf
+      "https://%s/api/v4/projects/%s/releases/%s"
+      h
+      (encode_path path)
+      (encode_path tag)
+  | Forgejo h -> Printf.sprintf "https://%s/api/v1/repos/%s/releases/tags/%s" h path tag
+;;
+
+(** Parse one single-release object: GitHub/Forgejo share
+    {!Gh.parse_release}; GitLab's object feeds {!gitlab_of_yojson}. *)
+let parse_single (p : t) (body : string) : (Gh.release, string) result =
+  try
+    match p with
+    | GitHub | Forgejo _ -> Gh.parse_release body
+    | GitLab _ -> Ok (gitlab_of_yojson (Yojson.Basic.from_string body))
+  with
+  | Yojson.Json_error msg -> Error ("decode: " ^ msg)
+  | Yojson.Basic.Util.Type_error (msg, _) -> Error ("decode: " ^ msg)
+;;
+
 (** Latest release for [repo] (a bare path or a full page URL) on [p].
     Sends [GH_TOKEN] bearer auth to GitHub and [GITLAB_TOKEN] as
     [PRIVATE-TOKEN] to GitLab; Forgejo-family needs no token for
     public repos. An empty tag is an [Error], so callers never compare
     against nothing. *)
 let latest (fetch : Fetch.fetch) (p : t) (repo : string) : (Gh.release, string) result =
-  let headers =
-    (match p with
-     | GitHub -> [ "Accept", "application/vnd.github+json" ]
-     | GitLab _ | Forgejo _ -> [ "Accept", "application/json" ])
-    @ [ "User-Agent", "devkit/1.0" ]
-    @
-    match p with
-    | GitHub ->
-      (match Sys.getenv_opt "GH_TOKEN" with
-       | None | Some "" -> []
-       | Some tok -> [ "Authorization", "Bearer " ^ tok ])
-    | GitLab _ ->
-      (match Sys.getenv_opt "GITLAB_TOKEN" with
-       | None | Some "" -> []
-       | Some tok -> [ "PRIVATE-TOKEN", tok ])
-    | Forgejo _ -> []
-  in
-  match fetch ~timeout_s:15 (api_url p repo) headers with
+  match fetch ~timeout_s:15 (api_url p repo) (headers_for p) with
   | Error e -> Error e
   | Ok body ->
     (match parse p body with
      | Ok rel when rel.Gh.tag_name <> "" -> Ok rel
      | Ok _ -> Error "decode: empty tag_name"
+     | Error _ as err -> err)
+;;
+
+(** [tag_exists fetch p repo tag] is whether release [tag] still
+    exists upstream (yank detection). A fetch error holding ["404"]
+    (curl [-f] surfaces HTTP 404 in the error text) is the yank
+    signal and answers [Ok false]; any other fetch error is unknown
+    (offline must never read as yanked) and passes through as
+    [Error]. A parseable body whose tag matches answers [Ok true], a
+    mismatched tag [Ok false], an empty tag or unparseable body an
+    [Error]. *)
+let tag_exists (fetch : Fetch.fetch) (p : t) (repo : string) (tag : string)
+  : (bool, string) result
+  =
+  match fetch ~timeout_s:15 (tag_url p repo tag) (headers_for p) with
+  | Error e -> if Strutil.contains_substring "404" e then Ok false else Error e
+  | Ok body ->
+    (match parse_single p body with
+     | Ok rel when rel.Gh.tag_name = "" -> Error "decode: empty tag_name"
+     | Ok rel -> Ok (rel.Gh.tag_name = tag)
      | Error _ as err -> err)
 ;;

@@ -77,6 +77,118 @@ let signature_skipped_off_windows () =
   Alcotest.(check bool) "passes silently" true (is_pass v)
 ;;
 
+let signer_of (out : string) ?(ok = true) () =
+  let seen = ref ("", []) in
+  let spawn prog args =
+    seen := prog, args;
+    out, ok
+  in
+  let r = Verify.signer ~os:"Win32" ~spawn "/t/Tool.exe" in
+  r, !seen
+;;
+
+let signer_table () =
+  let r, (prog, args) = signer_of "  ABCDEF1234\r\n" () in
+  Alcotest.(check (option string)) "trimmed thumbprint" (Some "ABCDEF1234") r;
+  Alcotest.(check string) "powershell" "powershell" prog;
+  Alcotest.(check bool)
+    "thumbprint one-liner"
+    true
+    (List.exists
+       (fun a -> Strutil.contains_substring "SignerCertificate.Thumbprint" a)
+       args);
+  Alcotest.(check (option string)) "empty -> none" None (fst (signer_of "" ()));
+  Alcotest.(check (option string)) "blank -> none" None (fst (signer_of "  \r\n" ()));
+  Alcotest.(check (option string))
+    "spawn fail -> none"
+    None
+    (fst (signer_of "ABC" ~ok:false ()))
+;;
+
+let signer_skipped_off_windows () =
+  let r =
+    Verify.signer
+      ~os:"Unix"
+      ~spawn:(fun _ _ -> Alcotest.fail "must not spawn")
+      "/t/Tool.exe"
+  in
+  Alcotest.(check (option string)) "none silently" None r
+;;
+
+let attest ~os ~probe ~verify =
+  let calls = ref [] in
+  let spawn prog args =
+    calls := (prog, args) :: !calls;
+    match prog with
+    | "gh" -> verify
+    | _ -> probe
+  in
+  let v = Verify.attestation ~os ~spawn ~repo:"owner/repo" "/t/Tool.exe" in
+  v, List.rev !calls
+;;
+
+let attestation_gh_missing () =
+  let v, calls = attest ~os:"Unix" ~probe:("", false) ~verify:("", true) in
+  Alcotest.(check bool) "passes" true (is_pass v);
+  Alcotest.(check bool)
+    "gh never invoked"
+    false
+    (List.exists (fun (prog, _) -> prog = "gh") calls);
+  let v, _ = attest ~os:"Unix" ~probe:("  \n", true) ~verify:("", true) in
+  Alcotest.(check bool) "blank probe passes" true (is_pass v)
+;;
+
+let attestation_verify_ok () =
+  let v, calls =
+    attest ~os:"Unix" ~probe:("/usr/bin/gh\n", true) ~verify:("verified", true)
+  in
+  Alcotest.(check bool) "passes" true (is_pass v);
+  match calls with
+  | (prog, args) :: _ ->
+    Alcotest.(check string) "probe prog" "command" prog;
+    Alcotest.(check (list string)) "probe args" [ "-v"; "gh" ] args
+  | [] -> Alcotest.fail "expected probe call"
+;;
+
+let attestation_no_attestation () =
+  let v, _ =
+    attest
+      ~os:"Unix"
+      ~probe:("/usr/bin/gh", true)
+      ~verify:("No attestation found for Tool.exe", false)
+  in
+  let w = warn_text v in
+  Alcotest.(check bool) "names file" true (Strutil.contains_substring "Tool.exe" w);
+  Alcotest.(check bool) "names repo" true (Strutil.contains_substring "owner/repo" w)
+;;
+
+let attestation_inconclusive () =
+  let v, _ =
+    attest ~os:"Unix" ~probe:("/usr/bin/gh", true) ~verify:("network unreachable", false)
+  in
+  Alcotest.(check bool)
+    "quotes output"
+    true
+    (Strutil.contains_substring "network unreachable" (warn_text v));
+  let v, _ = attest ~os:"Unix" ~probe:("/usr/bin/gh", true) ~verify:("", false) in
+  Alcotest.(check bool)
+    "empty says no output"
+    true
+    (Strutil.contains_substring "no output" (warn_text v))
+;;
+
+let attestation_win32_probe () =
+  let v, calls =
+    attest ~os:"Win32" ~probe:("C:\\tools\\gh.exe", true) ~verify:("", true)
+  in
+  Alcotest.(check bool) "passes" true (is_pass v);
+  match calls with
+  | (prog, args) :: _ ->
+    Alcotest.(check string) "where probe" "where" prog;
+    Alcotest.(check (list string)) "where args" [ "gh" ] args
+  | [] -> Alcotest.fail "expected probe call"
+;;
+
 let checksum_names () =
   let yes =
     [ "SHA256SUMS"
@@ -211,6 +323,17 @@ let () =
       , [ Alcotest.test_case "status table" `Quick signature_table
         ; Alcotest.test_case "powershell invocation" `Quick signature_invocation
         ; Alcotest.test_case "skipped off windows" `Quick signature_skipped_off_windows
+        ] )
+    ; ( "signer"
+      , [ Alcotest.test_case "table" `Quick signer_table
+        ; Alcotest.test_case "skipped off windows" `Quick signer_skipped_off_windows
+        ] )
+    ; ( "attestation"
+      , [ Alcotest.test_case "gh missing passes" `Quick attestation_gh_missing
+        ; Alcotest.test_case "verify ok passes" `Quick attestation_verify_ok
+        ; Alcotest.test_case "no attestation warns" `Quick attestation_no_attestation
+        ; Alcotest.test_case "other failure warns" `Quick attestation_inconclusive
+        ; Alcotest.test_case "win32 where probe" `Quick attestation_win32_probe
         ] )
     ; ( "sums"
       , [ Alcotest.test_case "file names" `Quick checksum_names

@@ -15,7 +15,9 @@
     truth and downloads then come from the vendor's releases instead of
     the community manifest. A top-level [sources] array selects the scan
     sources in order (["registry" first wins ties); missing means
-    {!default_sources}. Parsing is total: malformed TOML yields an
+    {!default_sources}. A top-level [quarantine_days] holds back fresh
+    releases globally; a per-package [quarantine_days] overrides it per
+    row. Parsing is total: malformed TOML yields an
     empty result, rejected rows are skipped with a [warnings] entry
     naming the fix. Statuses are never persisted; they are assigned at
     runtime by the merge step. *)
@@ -45,6 +47,7 @@ type item =
   ; available_version : string
   ; status : status
   ; upstream : string
+  ; quarantine_days : int
   }
 
 type section =
@@ -57,6 +60,7 @@ type parse_result =
   ; winget_path : string
   ; warnings : string list (** skipped rows, in document order, naming the fix *)
   ; sources : string list (** scan sources in order; {!default_sources} when unset *)
+  ; quarantine : int
   }
 
 (** Scan sources when the manifest sets none: classic order, registry last. *)
@@ -68,6 +72,7 @@ let make_item typ value =
   ; installed_version = ""
   ; available_version = ""
   ; upstream = ""
+  ; quarantine_days = 0
   ; (* Fresh items carry [NotFound]; statuses are assigned later by the
        merge step. *)
     status = NotFound
@@ -102,6 +107,14 @@ let get_str tbl k =
   match get tbl (key k |-- string) with
   | Some s -> s
   | None -> ""
+;;
+
+(** Clamped N-day value: negatives are 0, non-ints are [None] (ignored,
+    like other malformed keys). *)
+let get_days tbl k =
+  match get tbl (key k |-- int) with
+  | Some n -> Some (max n 0)
+  | None -> None
 ;;
 
 let has_blank s =
@@ -197,9 +210,15 @@ let classify (id : string) : (item_type * string, string) result =
 let parse (text : string) : parse_result =
   match Toml.Parser.from_string text with
   | `Error _ ->
-    { sections = []; winget_path = ""; warnings = []; sources = default_sources }
+    { sections = []
+    ; winget_path = ""
+    ; warnings = []
+    ; sources = default_sources
+    ; quarantine = 0
+    }
   | `Ok tbl ->
     let winget_path = get_str tbl "winget_path" in
+    let quarantine = get_days tbl "quarantine_days" |> Option.value ~default:0 in
     let sources =
       match get tbl (key "sources" |-- array |-- strings) with
       | Some (_ :: _ as ss) -> ss
@@ -239,11 +258,16 @@ let parse (text : string) : parse_result =
                         | None, Some id ->
                           (match classify id with
                            | Ok (typ, value) ->
+                             let quarantine_days =
+                               get_days pkg "quarantine_days"
+                               |> Option.value ~default:quarantine
+                             in
                              Some
                                { (make_item typ value) with
                                  installed_version = get_str pkg "installed_version"
                                ; available_version = get_str pkg "available_version"
                                ; upstream = get_str pkg "upstream"
+                               ; quarantine_days
                                }
                            | Error reason ->
                              skipped (String.trim id) reason;
@@ -254,11 +278,12 @@ let parse (text : string) : parse_result =
                Some { name; items }))
           secs
     in
-    { sections; winget_path; warnings = List.rev !warnings; sources }
+    { sections; winget_path; warnings = List.rev !warnings; sources; quarantine }
 ;;
 
 let str k v = Toml.Min.key k, Toml.Types.TString v
 let str_list k vs = Toml.Min.key k, Toml.Types.TArray (Toml.Types.NodeString vs)
+let num k v = Toml.Min.key k, Toml.Types.TInt v
 
 (** [to_string r] renders a manifest back to TOML. *)
 let to_string (r : parse_result) : string =
@@ -280,6 +305,9 @@ let to_string (r : parse_result) : string =
     Toml.Min.of_key_values
       ([ str "id" (id_of_item it) ]
        @ (if it.upstream <> "" then [ str "upstream" it.upstream ] else [])
+       @ (if it.quarantine_days <> 0
+          then [ num "quarantine_days" it.quarantine_days ]
+          else [])
        @ (if it.installed_version <> ""
           then [ str "installed_version" it.installed_version ]
           else [])
@@ -304,6 +332,7 @@ let to_string (r : parse_result) : string =
     @ (if r.sources <> [] && r.sources <> default_sources
        then [ str_list "sources" r.sources ]
        else [])
+    @ (if r.quarantine <> 0 then [ num "quarantine_days" r.quarantine ] else [])
     @ [ ( Toml.Min.key "section"
         , Toml.Types.TArray (Toml.Types.NodeTable (List.map sec r.sections)) )
       ]

@@ -70,3 +70,4 @@ val set_message : state -> string -> state
 val apply_outcome : state -> string -> Install.outcome -> state
 val apply_to_sections : section list -> state -> section list
 val apply_updates : state -> (string * string) list -> state
+val log_lines : state -> string list -> state
