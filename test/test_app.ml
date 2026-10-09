@@ -436,7 +436,10 @@ let doctor_fetch ?timeout_s:_ url _ =
       then "https://x/evil.yaml"
       else "https://x/plain.yaml"
     in
-    Ok (Printf.sprintf {|[{"type":"file","name":"x.installer.yaml","download_url":%S}]|} dl))
+    Ok
+      (Printf.sprintf
+         {|[{"type":"file","name":"x.installer.yaml","download_url":%S}]|}
+         dl))
   else Ok {|[{"type":"dir","name":"2.0"}]|}
 ;;
 
@@ -444,7 +447,9 @@ let doctor_cross_check () =
   let files = Hashtbl.create 1 in
   Hashtbl.add files Manifest.filename doctor_manifest;
   let run prog _ =
-    if prog = "C:\\w\\winget.exe" then Some "Name  Argument\nmsstore  https://x\n" else None
+    if prog = "C:\\w\\winget.exe"
+    then Some "Name  Argument\nmsstore  https://x\n"
+    else None
   in
   let e = { (env files) with run; fetch = doctor_fetch } in
   match App.doctor_view e with
@@ -456,7 +461,9 @@ let doctor_cross_check () =
     Alcotest.(check bool)
       "mismatch flagged"
       true
-      (contains "Evil.App: MISMATCH serves from evil.example.com, vendor is github.com" body);
+      (contains
+         "Evil.App: MISMATCH serves from evil.example.com, vendor is github.com"
+         body);
     Alcotest.(check bool)
       "unpinned noted"
       true
@@ -474,6 +481,30 @@ let doctor_no_winget () =
       true
       (contains "winget unavailable (skipped)" body);
     Alcotest.(check bool) "no rows" true (contains "no winget rows" body)
+;;
+
+let winget_table =
+  "Brave  Brave.Brave  1.80.122  winget\n" ^ "Git  Git.Git  2.47.1  2.48.0  winget\n"
+;;
+
+let info_of_table () =
+  (* Raw output parses; a failed winget falls back to scan rows; both
+     empty means None. *)
+  let apps =
+    [ { Dashboard.name = "Brave.Brave"; version = "1.80.122"; pm = "winget" } ]
+  in
+  (match App.info_of (Some winget_table) [] with
+   | None -> Alcotest.fail "table should parse"
+   | Some m ->
+     (match Winget_parse.IdMap.find_opt "git.git" m with
+      | None -> Alcotest.fail "git row missing"
+      | Some inf ->
+        Alcotest.(check string) "available kept" "2.48.0" inf.Winget_parse.available));
+  (match App.info_of None apps with
+   | None -> Alcotest.fail "scan fallback should fire"
+   | Some m -> Alcotest.(check int) "one fallback row" 1 (Winget_parse.IdMap.cardinal m));
+  Alcotest.(check bool) "both empty" true (App.info_of None [] = None);
+  Alcotest.(check bool) "garbage out" true (App.info_of (Some "garbage") [] = None)
 ;;
 
 let () =
@@ -508,6 +539,7 @@ let () =
         ; Alcotest.test_case "default empty" `Quick default_empty
         ; Alcotest.test_case "doctor cross-check" `Quick doctor_cross_check
         ; Alcotest.test_case "doctor no winget" `Quick doctor_no_winget
+        ; Alcotest.test_case "info of" `Quick info_of_table
         ] )
     ]
 ;;

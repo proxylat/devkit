@@ -30,3 +30,7 @@ val reserved_names : string list
 
 (** Run one plugin tool; missing binary means skipped. *)
 val scan_tool : Proc.runner -> Plugin.tool -> Dashboard.app list
+
+(** [DEVKIT_TIMING=1] phase timer shared by the scan and the TUI's
+    progressive loop: one [[timing] <label>: Nms] line on stderr. *)
+val time_src : string -> (unit -> 'a) -> 'a

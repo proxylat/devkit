@@ -338,6 +338,22 @@ let apply_to_sections_reflects_session () =
   Alcotest.(check bool) "renders green" true (Tui.color_of b.Manifest.status = Tui.Green)
 ;;
 
+let remake_keeps_session () =
+  let s = Tui.make (sections ()) ~height:10 ~width:80 in
+  let s = Tui.step s Tui.End in
+  let s = Tui.log_lines s [ "installed x" ] in
+  let s = Tui.set_message s "old" in
+  (* Fresh sections drop a row: entries rebuild, cursor clamps, log
+     survives, message clears. *)
+  let secs = [ { Manifest.name = "tools"; items = [ item Manifest.Installed "a" ] } ] in
+  let s = Tui.remake s secs in
+  Alcotest.(check int) "one row" 1 (List.length s.Tui.entries);
+  Alcotest.(check int) "cursor clamped" 0 s.Tui.cursor;
+  Alcotest.(check (list string)) "log kept" [ "installed x"; "old" ] s.Tui.log;
+  Alcotest.(check (option string)) "message cleared" None s.Tui.message;
+  Alcotest.(check int) "height kept" 10 s.Tui.height
+;;
+
 let () =
   Alcotest.run
     "tui"
@@ -361,6 +377,7 @@ let () =
         ; Alcotest.test_case "failure logs reason" `Quick apply_failure_logs_reason
         ; Alcotest.test_case "open keeps status" `Quick open_keeps_status
         ; Alcotest.test_case "end state green" `Quick apply_to_sections_reflects_session
+        ; Alcotest.test_case "remake keeps session" `Quick remake_keeps_session
         ; Alcotest.test_case "set message" `Quick set_message
         ] )
     ; ( "frame"

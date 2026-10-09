@@ -3,17 +3,19 @@
     Draws {!Devkit.Tui.frame} lines, feeds key events in, runs installs
     on Enter. On exit the plain-text dashboard plus the install log go
     to stdout, so redirected output stays usable. Lambda-term (unlike
-    notty) has a real Windows backend, so this frontend     serves both
-    OSes. The scan runs on a preemptive worker behind an instant loading
-    frame (quit/resize stay live); installs and update checks run
-    synchronously (the event loop freezes) but paint a status line first,
-    so the screen states what is running instead of looking dead.
-    Install failures log the full reason ([id: error: ...]), not the
-    bare status.
+    notty) has a real Windows backend, so this frontend serves both
+    OSes. First paint is instant (cached inventory or a loading row);
+    a progressive refresh then repaints as each source lands on
+    parallel workers, followed by winget-show enrichment and upstream
+    tags — quit/resize stay live throughout. Installs and [u]
+    rescans run synchronously (the event loop freezes) but paint a
+    status line first, so the screen states what is running instead of
+    looking dead. Install failures log the full reason ([id: error:
+    ...]), not the bare status.
     Mouse reporting is on for wheel-scroll only; other mouse events are
     ignored. *)
-
 open Devkit
+
 open Lwt.Infix
 
 let style_of_color : Tui.color -> LTerm_style.t = function
@@ -45,6 +47,23 @@ type ev =
   | Action of Tui.action
   | Resized of LTerm_geom.size
   | Nothing
+
+(** One background result: a landed source (apps plus the raw [winget
+    list] output, if it was winget's turn) or the resolved winget
+    binary. *)
+type landing =
+  | Src of string * Dashboard.app list * string option
+  | Ens of string * string
+
+(** Progressive refresh accumulator: landed source results, the raw
+    winget output, the resolved winget binary, and jobs in flight. *)
+type prog =
+  { landed : (string * Dashboard.app list) list
+  ; winget_out : string option
+  ; winget : string
+  ; winget_error : string
+  ; pending : int
+  }
 
 let is_ctrl_q : Uchar.t -> bool =
   fun c -> Uchar.equal c (Uchar.of_char 'q') || Uchar.equal c (Uchar.of_char 'Q')
@@ -141,19 +160,50 @@ let press_enter ~draw (deps : Install.deps) (st : Tui.state) : Tui.state Lwt.t =
 
 let viewport (w : int) (h : int) : int * int = max 1 w, max 1 (h - 3)
 
-(** [u]: check npm/pipx/uv/cargo updates for the Installed rows, then
-    mark the hits. Yank warnings ride the log, not the footer. Paints a
-    status line first, then runs synchronously like installs (UI freezes). *)
-let press_u ~draw (run : Proc.runner) (fetch : Fetch.fetch) (load_lock : unit -> Lockfile.t)
+(** [u]: full rescan (sources, show enrichment, upstream tags), then
+    the Installed-row update check for the non-winget PMs. Yank
+    warnings ride the log, not the footer. Paints a status line first,
+    then runs synchronously like installs (UI freezes). The fresh
+    inventory also rewrites the disk cache, so the next launch paints
+    current data instantly. *)
+let press_u
+      ~draw
+      (env : App.env)
+      (tools : Plugin.tool list)
+      (load_lock : unit -> Lockfile.t)
+      (cache_file : string option)
       (st : Tui.state)
   : Tui.state Lwt.t
   =
-  let items = List.map (fun e -> e.Tui.item) st.Tui.entries in
-  draw (Tui.set_message st "checking updates ...")
+  draw (Tui.set_message st "rescanning ...")
   >>= fun () ->
   Lwt.pause ()
   >>= fun () ->
-  let updates, warns = Update.check_all ~run ~fetch ~lock:(load_lock ()) items in
+  let sections, winget_path, sources = App.load_manifest env.App.fs Manifest.filename in
+  let s = App.scan env ~override_path:winget_path ~extra:tools ~sources () in
+  let show id =
+    match App.winget_show env.App.bio s.App.winget id with
+    | "" -> None
+    | v -> Some v
+  in
+  let upstream_ver = App.upstream_ver_of_fetch env.App.fetch in
+  let dash =
+    Dashboard.build_sections
+      ~show
+      ~upstream_ver
+      ~run:(Some env.App.run)
+      s.App.apps
+      sections
+      s.App.info
+  in
+  (match cache_file with
+   | None -> ()
+   | Some f -> Scan_cache.save f s.App.apps s.App.info);
+  let st = Tui.remake st dash in
+  let items = List.map (fun e -> e.Tui.item) st.Tui.entries in
+  let updates, warns =
+    Update.check_all ~run:env.App.run ~fetch:env.App.fetch ~lock:(load_lock ()) items
+  in
   Lwt.return (Tui.log_lines (Tui.apply_updates st updates) warns)
 ;;
 
@@ -191,25 +241,65 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
      so the wait looks alive past the alternate screen. *)
   prerr_endline "scanning installed software...";
   flush stderr;
-  let do_scan () =
-    let sections, winget_path, sources = App.load_manifest env.App.fs Manifest.filename in
-    let s = App.scan env ~override_path:winget_path ~extra:tools ~sources () in
-    let show id =
-      match App.winget_show env.App.bio s.App.winget id with
-      | "" -> None
-      | v -> Some v
-    in
-    let upstream_ver = App.upstream_ver_of_fetch env.App.fetch in
-    let dash =
-      Dashboard.build_sections
-        ~show
-        ~upstream_ver
-        ~run:(Some env.App.run)
-        s.App.apps
-        sections
-        s.App.info
-    in
-    dash, s, winget_path
+  let sections, winget_path, sources = App.load_manifest env.App.fs Manifest.filename in
+  let cache_file = Scan_cache.cache_path () in
+  let cached = Option.bind cache_file Scan_cache.load in
+  let fetch_exe, _ = Proc.winget_list env.App.run in
+  let fetch = Fetch.curl_fetch Proc.default_runner in
+  (* Worker bodies never raise: a failed source contributes nothing,
+     exactly like {!Inventory.scan_all}. *)
+  let guarded : type a. string -> a -> (unit -> a) -> a =
+    fun what dflt f ->
+    try f () with
+    | e ->
+      prerr_endline ("devkit: " ^ what ^ " failed: " ^ Printexc.to_string e);
+      dflt
+  in
+  (* One source on a worker thread: blocking spawns only, no Lwt.
+     [winget_exe] is the ensure-resolved binary ("" = PATH lookup). *)
+  let scan_one (winget_exe : string) (name : string) : Dashboard.app list * string option =
+    Inventory.time_src name (fun () ->
+      if name = "winget"
+      then (
+        match fetch_exe winget_exe with
+        | None -> [], None
+        | Some out -> Inventory.parse_winget out, Some out)
+      else if name = "registry"
+      then
+        if Sys.os_type = "Win32" then Inventory.scan_reg env.App.run, None else [], None
+      else (
+        match
+          List.find_opt
+            (fun (t : Plugin.tool) -> t.Plugin.name = name)
+            (Inventory.built_ins @ tools)
+        with
+        | None -> [], None
+        | Some t -> Inventory.scan_tool env.App.run t, None))
+  in
+  let ensure_one () : string * string =
+    Inventory.time_src "ensure" (fun () ->
+      match Bootstrap.ensure ~override_path:winget_path env.App.bio with
+      | Ok w -> w, ""
+      | Error err -> "", err)
+  in
+  let apps_of (srcs : string list) (p : prog) : Dashboard.app list =
+    List.concat_map (fun n -> List.assoc_opt n p.landed |> Option.value ~default:[]) srcs
+  in
+  (* Cached paint: the previous run's inventory merged without any
+     spawn (no show, no upstream, no PATH probe). Guarded so a
+     corrupt cache degrades to the loading row instead of killing
+     startup. *)
+  let cached_dash =
+    guarded "cached merge" [] (fun () ->
+      match cached with
+      | None -> []
+      | Some snap ->
+        let info =
+          if snap.Scan_cache.info = []
+          then None
+          else Some (Scan_cache.to_info_map snap.Scan_cache.info)
+        in
+        Dashboard.build_sections snap.Scan_cache.apps sections info)
   in
   let cleanup term mode =
     LTerm.disable_mouse term
@@ -235,7 +325,7 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
        let vw, vh = viewport geom.LTerm_geom.cols geom.LTerm_geom.rows in
        (* Main loop once the scan lands: draws, then waits. Events that
           change nothing skip the repaint. *)
-       let main_loop deps fetch load_lock init =
+       let main_loop deps load_lock init =
          let rec draw_loop (st : Tui.state) : Tui.state Lwt.t =
            draw_all term st >>= fun () -> wait_loop st
          and wait_loop (st : Tui.state) : Tui.state Lwt.t =
@@ -245,7 +335,8 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
            | Quit -> Lwt.return st
            | Nothing -> wait_loop st
            | Enter -> press_enter ~draw:(draw_all term) deps st >>= draw_loop
-           | Update -> press_u ~draw:(draw_all term) env.App.run fetch load_lock st >>= draw_loop
+           | Update ->
+             press_u ~draw:(draw_all term) env tools load_lock cache_file st >>= draw_loop
            | Action a -> draw_loop (Tui.step st a)
            | Resized g ->
              LTerm.clear_screen term
@@ -256,64 +347,265 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
          draw_loop init
        in
        let loading =
-         Tui.set_message
-           (Tui.make [] ~height:vh ~width:vw)
-           "scanning installed software..."
+         match cached with
+         | None ->
+           Tui.set_message
+             (Tui.make [] ~height:vh ~width:vw)
+             "scanning installed software..."
+         | Some _ ->
+           Tui.set_message (Tui.make cached_dash ~height:vh ~width:vw) "refreshing..."
        in
+       let cur_dash = ref cached_dash in
        draw_all term loading
        >>= fun () ->
-       let scan_job = Lwt_preemptive.detach do_scan () in
-       let rec wait_scan (st : Tui.state)
-         : [ `Done of Manifest.section list * App.scan * Tui.state | `Quit ] Lwt.t
+       let stream, push = Lwt_stream.create () in
+       let cancels = ref [] in
+       (* One worker per job; each pushes exactly one landing, then
+           the forwarding fiber ends. The [>>=] continuation runs on
+           the Lwt thread, so [push] is safe there. *)
+       let spawn (f : unit -> landing) : unit =
+         let job = Lwt_preemptive.detach f () in
+         cancels := (fun () -> Lwt.cancel job) :: !cancels;
+         Lwt.async (fun () ->
+           Lwt.catch
+             (fun () ->
+                job
+                >>= fun r ->
+                push (Some r);
+                Lwt.return_unit)
+             (function
+               | Lwt.Canceled -> Lwt.return_unit
+               | e -> Lwt.fail e))
+       in
+       let cancel_all () = List.iter (fun c -> c ()) !cancels in
+       let make_deps () =
+         let read_file p =
+           match env.App.fs.read_file p with
+           | None -> Error "not found"
+           | Some t -> Ok t
+         in
+         let load_lock () =
+           match env.App.fs.read_file Lockfile.filename with
+           | None -> []
+           | Some t -> Lockfile.parse t
+         in
+         let deps =
+           Install.real_deps
+             fetch
+             ~winget_override:winget_path
+             ~read_file
+             ~write_file:env.App.fs.write_file
+             ()
+         in
+         deps, load_lock
+       in
+       (* Single-job wait (show / upstream phases): repaint once when
+           the merge lands, quit/resize stay live. *)
+       let rec wait_one
+                 (st : Tui.state)
+                 (job : Manifest.section list Lwt.t)
+                 (apply : Manifest.section list -> Tui.state -> Tui.state)
+         : [ `Done of Tui.state | `Quit ] Lwt.t
          =
          Lwt.pick
-           [ (scan_job >|= fun r -> `Scan r)
-           ; (LTerm.read_event term >|= fun e -> `Event e)
-           ]
+           [ (job >|= fun r -> `Job r); (LTerm.read_event term >|= fun e -> `Event e) ]
          >>= function
-         | `Scan (dash, s, winget_path) ->
-           let fetch = Fetch.curl_fetch Proc.default_runner in
-           let read_file p =
-             match env.App.fs.read_file p with
-             | None -> Error "not found"
-             | Some t -> Ok t
-           in
-           let load_lock () =
-             match env.App.fs.read_file Lockfile.filename with
-             | None -> []
-             | Some t -> Lockfile.parse t
-           in
-           let deps =
-             Install.real_deps
-               fetch
-               ~winget_override:winget_path
-               ~read_file
-               ~write_file:env.App.fs.write_file
-               ()
-           in
-           let init = Tui.make dash ~height:st.Tui.height ~width:st.Tui.width in
-           let init =
-             match empty_scan_message s with
-             | None -> init
-             | Some m -> Tui.set_message init m
-           in
-           main_loop deps fetch load_lock init
-           >>= fun final ->
-           cleanup term mode >>= fun () -> Lwt.return (`Done (dash, s, final))
+         | `Job r ->
+           let st = apply r st in
+           draw_all term st >>= fun () -> Lwt.return (`Done st)
          | `Event ev ->
            (match classify ev with
             | Quit ->
-              Lwt.cancel scan_job;
+              Lwt.cancel job;
+              cancel_all ();
               cleanup term mode >>= fun () -> Lwt.return `Quit
             | Resized g ->
               LTerm.clear_screen term
               >>= fun () ->
               let vw, vh = viewport g.LTerm_geom.cols g.LTerm_geom.rows in
               let st = Tui.resize st ~height:vh ~width:vw in
-              draw_all term st >>= fun () -> wait_scan st
-            | _ -> wait_scan st)
+              draw_all term st >>= fun () -> wait_one st job apply
+            | _ -> wait_one st job apply)
        in
-       wait_scan loading)
+       (* Source phase: repaint per landing until every worker has
+           reported. Winget waits for ensure (portable installs live
+           off PATH), everything else races it. *)
+       let rec wait_sources (srcs : string list) (p : prog) (st : Tui.state)
+         : [ `Done of prog * Tui.state | `Quit ] Lwt.t
+         =
+         if p.pending = 0
+         then Lwt.return (`Done (p, st))
+         else
+           Lwt.pick
+             [ (Lwt_stream.get stream >|= fun r -> `Data r)
+             ; (LTerm.read_event term >|= fun e -> `Event e)
+             ]
+           >>= function
+           | `Data None -> Lwt.return (`Done (p, st))
+           | `Data (Some (Src (name, apps, out))) ->
+             let p =
+               { p with
+                 landed = (name, apps) :: p.landed
+               ; winget_out =
+                   (match out with
+                    | None -> p.winget_out
+                    | Some _ -> out)
+               ; pending = p.pending - 1
+               }
+             in
+             let apps_all = apps_of srcs p in
+             let info = App.info_of p.winget_out apps_all in
+             let dash =
+               Inventory.time_src "merge" (fun () ->
+                 Dashboard.build_sections ~run:(Some env.App.run) apps_all sections info)
+             in
+             cur_dash := dash;
+             let st = Tui.set_message (Tui.remake st dash) "refreshing..." in
+             draw_all term st >>= fun () -> wait_sources srcs p st
+           | `Data (Some (Ens (w, err))) ->
+             let p = { p with winget = w; winget_error = err; pending = p.pending - 1 } in
+             let p =
+               if List.mem "winget" srcs
+               then (
+                 spawn (fun () ->
+                   let apps, out =
+                     guarded "scan:winget" ([], None) (fun () -> scan_one w "winget")
+                   in
+                   Src ("winget", apps, out));
+                 { p with pending = p.pending + 1 })
+               else p
+             in
+             wait_sources srcs p st
+           | `Event ev ->
+             (match classify ev with
+              | Quit ->
+                cancel_all ();
+                cleanup term mode >>= fun () -> Lwt.return `Quit
+              | Resized g ->
+                LTerm.clear_screen term
+                >>= fun () ->
+                let vw, vh = viewport g.LTerm_geom.cols g.LTerm_geom.rows in
+                let st = Tui.resize st ~height:vh ~width:vw in
+                draw_all term st >>= fun () -> wait_sources srcs p st
+              | _ -> wait_sources srcs p st)
+       in
+       match App.resolve_sources sources ~tools with
+       | Error err ->
+         (* No workers: straight to the main loop with the error. *)
+         let s =
+           { App.apps = []
+           ; info = None
+           ; winget = ""
+           ; winget_error = ""
+           ; sources_error = err
+           }
+         in
+         let dash = Dashboard.build_sections [] sections None in
+         cur_dash := dash;
+         let init = Tui.make dash ~height:loading.Tui.height ~width:loading.Tui.width in
+         let init =
+           match empty_scan_message s with
+           | None -> init
+           | Some m -> Tui.set_message init m
+         in
+         let deps, load_lock = make_deps () in
+         main_loop deps load_lock init
+         >>= fun final ->
+         cleanup term mode >>= fun () -> Lwt.return (`Done (dash, s, final))
+       | Ok srcs ->
+         spawn (fun () ->
+           let w, err = guarded "ensure" ("", "ensure failed") ensure_one in
+           Ens (w, err));
+         let non_winget = List.filter (fun n -> n <> "winget") srcs in
+         List.iter
+           (fun n ->
+              spawn (fun () ->
+                let apps, out =
+                  guarded ("scan:" ^ n) ([], None) (fun () -> scan_one "" n)
+                in
+                Src (n, apps, out)))
+           non_winget;
+         let p =
+           { landed = []
+           ; winget_out = None
+           ; winget = ""
+           ; winget_error = ""
+           ; pending = 1 + List.length non_winget
+           }
+         in
+         wait_sources srcs p loading
+         >>= (function
+          | `Quit -> Lwt.return `Quit
+          | `Done (p, st) ->
+            let apps = apps_of srcs p in
+            let info = App.info_of p.winget_out apps in
+            (match cache_file with
+             | None -> ()
+             | Some f -> Scan_cache.save f apps info);
+            let s =
+              { App.apps
+              ; info
+              ; winget = p.winget
+              ; winget_error = p.winget_error
+              ; sources_error = ""
+              }
+            in
+            let show id =
+              match App.winget_show env.App.bio p.winget id with
+              | "" -> None
+              | v -> Some v
+            in
+            let upstream_ver = App.upstream_ver_of_fetch fetch in
+            let show_job =
+              Lwt_preemptive.detach
+                (fun () ->
+                   guarded "show" !cur_dash (fun () ->
+                     Inventory.time_src "show" (fun () ->
+                       Dashboard.build_sections
+                         ~show
+                         ~run:(Some env.App.run)
+                         apps
+                         sections
+                         info)))
+                ()
+            in
+            wait_one st show_job (fun dash st ->
+              cur_dash := dash;
+              Tui.set_message (Tui.remake st dash) "refreshing...")
+            >>= (function
+             | `Quit -> Lwt.return `Quit
+             | `Done st ->
+               let up_job =
+                 Lwt_preemptive.detach
+                   (fun () ->
+                      guarded "upstream" !cur_dash (fun () ->
+                        Inventory.time_src "upstream" (fun () ->
+                          Dashboard.build_sections
+                            ~show
+                            ~upstream_ver
+                            ~run:(Some env.App.run)
+                            apps
+                            sections
+                            info)))
+                   ()
+               in
+               wait_one st up_job (fun dash st ->
+                 cur_dash := dash;
+                 Tui.set_message (Tui.remake st dash) "refreshing...")
+               >>= (function
+                | `Quit -> Lwt.return `Quit
+                | `Done st ->
+                  let st = { st with Tui.message = None } in
+                  let deps, load_lock = make_deps () in
+                  let init =
+                    match empty_scan_message s with
+                    | None -> st
+                    | Some m -> Tui.set_message st m
+                  in
+                  main_loop deps load_lock init
+                  >>= fun final ->
+                  cleanup term mode >>= fun () -> Lwt.return (`Done (!cur_dash, s, final)))))
+      )
   in
   match outcome with
   | `Quit -> ()

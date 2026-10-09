@@ -335,6 +335,23 @@ let dedup (xs : string list) : string list =
     xs
 ;;
 
+(** Per-source phase timing for [DEVKIT_TIMING=1] (see {!App.timed}):
+    one line per source, formatted before printing so concurrent
+    domains don't interleave mid-line. *)
+let time_src (label : string) (f : unit -> 'a) : 'a =
+  match Sys.getenv_opt "DEVKIT_TIMING" with
+  | None | Some "" -> f ()
+  | Some _ ->
+    let t0 = Unix.gettimeofday () in
+    let r = f () in
+    prerr_endline
+      (Printf.sprintf
+         "[timing] src %s: %.0fms"
+         label
+         ((Unix.gettimeofday () -. t0) *. 1000.0));
+    r
+;;
+
 (** Full scan order follows [sources]: winget, npm, pipx, uv, cargo,
     registry, then [extra] custom tools in file order — each slotted
     where its name appears (unknown names are ignored here; {!App}
@@ -344,6 +361,7 @@ let dedup (xs : string list) : string list =
     memoized [winget list] fetch ([Proc.winget_list]), so a scan
     followed by an update check spawns winget once per window.
     [registry] only spawns on Windows ([reg] exists nowhere else). *)
+
 let scan_all
       (run : Proc.runner)
       ~(winget : unit -> string option)
@@ -356,16 +374,18 @@ let scan_all
   let sources = dedup sources in
   let winget_dom =
     Domain.spawn (fun () ->
-      if not (List.mem "winget" sources)
-      then []
-      else (
-        match winget () with
-        | None -> []
-        | Some out -> parse_winget out))
+      time_src "winget" (fun () ->
+        if not (List.mem "winget" sources)
+        then []
+        else (
+          match winget () with
+          | None -> []
+          | Some out -> parse_winget out)))
   in
   let reg_dom =
     Domain.spawn (fun () ->
-      if List.mem "registry" sources && os = "Win32" then scan_reg run else [])
+      time_src "registry" (fun () ->
+        if List.mem "registry" sources && os = "Win32" then scan_reg run else []))
   in
   let tool_of name =
     List.find_opt
@@ -373,7 +393,11 @@ let scan_all
       ([ npm_tool; pipx_tool; uv_tool; cargo_tool ] @ extra)
   in
   let tools = List.filter_map tool_of sources in
-  let tool_apps = Proc.par_map8 (scan_tool run) tools in
+  let tool_apps =
+    Proc.par_map8
+      (fun (t : Plugin.tool) -> time_src t.name (fun () -> scan_tool run t))
+      tools
+  in
   let winget_apps = Domain.join winget_dom in
   let reg_apps = Domain.join reg_dom in
   List.concat_map

@@ -28,6 +28,13 @@ val load_manifest : fs -> string -> Manifest.section list * string * string list
 
 val winget_show : Bootstrap.io -> string -> string -> string
 
+(** Winget info table from raw [winget list] output (scan-row fallback,
+    [None] when both are empty). *)
+val info_of
+  :  string option
+  -> Dashboard.app list
+  -> Winget_parse.info Winget_parse.IdMap.t option
+
 (** Vendor truth for [upstream] rows: [(provider, repo)] → latest
     release tag ([None] on any failure). *)
 val upstream_ver_of_fetch : Fetch.fetch -> Provider.t -> string -> string option

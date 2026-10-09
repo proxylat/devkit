@@ -79,3 +79,7 @@
 (test
  (name test_winget_manifest)
  (libraries devkit alcotest))
+
+(test
+ (name test_scan_cache)
+ (libraries devkit alcotest))

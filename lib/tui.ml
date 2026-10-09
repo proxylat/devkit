@@ -64,6 +64,14 @@ let resize (s : state) ~(height : int) ~(width : int) : state =
   clamp { s with height = max 1 height; width = max 1 width }
 ;;
 
+(** Rebuild entries from fresh sections, keeping cursor (clamped),
+    geometry and the log; the message is cleared. A background refresh
+    or [u] rescan lands through here instead of [make], so the session
+    (cursor, log) survives new data. *)
+let remake (s : state) (sections : section list) : state =
+  clamp { s with entries = build_entries sections; message = None }
+;;
+
 type action =
   | Up
   | Down
@@ -333,9 +341,7 @@ let apply_to_sections (sections : section list) (s : state) : section list =
 (** Append lines to the log without touching the footer message:
     background findings (yank warnings, lock notes) that deserve the
     exit printout but not the status line. *)
-let log_lines (s : state) (lines : string list) : state =
-  { s with log = s.log @ lines }
-;;
+let log_lines (s : state) (lines : string list) : state = { s with log = s.log @ lines }
 
 (** Mark rows with available updates: set available_version +
     [NeedsUpdate] by value, with a summary message + log. An empty

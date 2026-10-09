@@ -21,6 +21,11 @@ type state =
 
 val make : section list -> height:int -> width:int -> state
 val clamp : state -> state
+
+(** Fresh sections under a live session: entries rebuilt, cursor
+    clamped, geometry and log kept, message cleared. *)
+val remake : state -> section list -> state
+
 val resize : state -> height:int -> width:int -> state
 
 type action =

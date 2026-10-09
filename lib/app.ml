@@ -66,6 +66,26 @@ let info_from_scan (apps : app list) : Winget_parse.info Winget_parse.IdMap.t =
     apps
 ;;
 
+(** Winget info table from raw [winget list] output, falling back to
+    scan rows when winget failed; [None] when both are empty. Pulled
+    out of [scan] so the TUI's progressive loop rebuilds it as sources
+    land instead of waiting for the full scan. *)
+let info_of (winget_out : string option) (apps : app list)
+  : Winget_parse.info Winget_parse.IdMap.t option
+  =
+  match winget_out with
+  | None ->
+    let m = info_from_scan apps in
+    if Winget_parse.IdMap.is_empty m then None else Some m
+  | Some out ->
+    let m = Winget_parse.parse_list_table out in
+    if Winget_parse.IdMap.is_empty m
+    then (
+      let fb = info_from_scan apps in
+      if Winget_parse.IdMap.is_empty fb then None else Some fb)
+    else Some m
+;;
+
 (** [winget show --id <id>] → repo's latest version, "" on failure. *)
 let winget_show (bio : Bootstrap.io) (winget : string) (id : string) : string =
   if winget = ""
@@ -187,20 +207,7 @@ let scan
           ~sources:srcs
           ())
     in
-    let info =
-      timed "info" (fun () ->
-        match fetch winget with
-        | None ->
-          let m = info_from_scan apps in
-          if Winget_parse.IdMap.is_empty m then None else Some m
-        | Some out ->
-          let m = Winget_parse.parse_list_table out in
-          if Winget_parse.IdMap.is_empty m
-          then (
-            let fb = info_from_scan apps in
-            if Winget_parse.IdMap.is_empty fb then None else Some fb)
-          else Some m)
-    in
+    let info = timed "info" (fun () -> info_of (fetch winget) apps) in
     { apps; info; winget; winget_error; sources_error = "" }
 ;;
 
@@ -516,7 +523,10 @@ let doctor_view (e : env) : (string list, string) result =
      objects/release-assets hosts, forges from their own host. *)
   let expected_of = function
     | Provider.GitHub ->
-      [ "github.com"; "objects.githubusercontent.com"; "release-assets.githubusercontent.com" ]
+      [ "github.com"
+      ; "objects.githubusercontent.com"
+      ; "release-assets.githubusercontent.com"
+      ]
     | Provider.GitLab h | Provider.Forgejo h -> [ lower h ]
   in
   let prov_host = function
@@ -545,7 +555,11 @@ let doctor_view (e : env) : (string list, string) result =
       let hs = String.concat ", " hosts in
       if it.upstream = ""
       then
-        [ Printf.sprintf "  %s: serves from %s (no upstream pin: cannot verify)" it.value hs ]
+        [ Printf.sprintf
+            "  %s: serves from %s (no upstream pin: cannot verify)"
+            it.value
+            hs
+        ]
       else (
         let prov, _ = Provider.of_upstream it.upstream in
         let expected = expected_of prov in
