@@ -158,8 +158,7 @@ let parse_reg (output : string) : app list =
     cur := []
   in
   List.iter
-    (fun raw ->
-       if String.trim raw = "" then flush () else cur := raw :: !cur)
+    (fun raw -> if String.trim raw = "" then flush () else cur := raw :: !cur)
     (lines_of output);
   flush ();
   List.filter_map
@@ -170,8 +169,7 @@ let parse_reg (output : string) : app list =
          (fun raw ->
             match fields (String.trim raw) with
             | key :: typ :: rest
-              when rest <> []
-                   && (typ = "REG_SZ" || typ = "REG_EXPAND_SZ") ->
+              when rest <> [] && (typ = "REG_SZ" || typ = "REG_EXPAND_SZ") ->
               let data = String.concat " " rest in
               (match String.lowercase_ascii key with
                | "displayname" -> name := data
@@ -282,7 +280,9 @@ let built_ins : Plugin.tool list =
     change a built-in scan). [registry] is reserved although it scans
     bespoke (three hives, one sweep): a custom tool under that name
     would hijack the sources toggle and the install skip. *)
-let reserved_names : string list = "registry" :: List.map (fun (t : Plugin.tool) -> t.name) built_ins
+let reserved_names : string list =
+  "registry" :: List.map (fun (t : Plugin.tool) -> t.name) built_ins
+;;
 
 (** Run one plugin tool: missing binary (or failure) means skipped, as
     with every built-in scanner. *)
@@ -314,7 +314,11 @@ let scan_reg (run : Proc.runner) : app list =
   List.filter
     (fun (a : app) ->
        let k = String.lowercase_ascii a.name in
-       if Hashtbl.mem seen k then false else (Hashtbl.replace seen k (); true))
+       if Hashtbl.mem seen k
+       then false
+       else (
+         Hashtbl.replace seen k ();
+         true))
     apps
 ;;
 
@@ -323,7 +327,11 @@ let dedup (xs : string list) : string list =
   let seen = Hashtbl.create 8 in
   List.filter
     (fun x ->
-       if Hashtbl.mem seen x then false else (Hashtbl.replace seen x (); true))
+       if Hashtbl.mem seen x
+       then false
+       else (
+         Hashtbl.replace seen x ();
+         true))
     xs
 ;;
 
@@ -376,7 +384,9 @@ let scan_all
        then reg_apps
        else (
          match
-           List.find_opt (fun ((t : Plugin.tool), _) -> t.name = name) (List.combine tools tool_apps)
+           List.find_opt
+             (fun ((t : Plugin.tool), _) -> t.name = name)
+             (List.combine tools tool_apps)
          with
          | Some (_, apps) -> apps
          | None -> []))

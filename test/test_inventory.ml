@@ -90,9 +90,7 @@ let scan () =
     | "cargo" -> Some "rg v14.1.0:\n"
     | _ -> None
   in
-  let apps =
-    Inventory.scan_all run ~winget:(fun () -> Some winget_table) ~extra:[] ()
-  in
+  let apps = Inventory.scan_all run ~winget:(fun () -> Some winget_table) ~extra:[] () in
   check_apps
     "scan order and tags"
     [ Dashboard.{ name = "Brave.Brave"; version = "1.80.122"; pm = "winget" }
@@ -125,7 +123,14 @@ let memo_failure () =
 ;;
 
 let reg_out =
-  "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{A1}\n    DisplayName    REG_SZ    7-Zip 24.09\n    DisplayVersion    REG_SZ    24.09\n\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{B2}\n    DisplayName    REG_EXPAND_SZ    GitHub CLI\n    DisplayVersion    REG_DWORD    0x1\n\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{C3}\n    DisplayVersion    REG_SZ    9.9\n"
+  "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{A1}\n\
+  \    DisplayName    REG_SZ    7-Zip 24.09\n\
+  \    DisplayVersion    REG_SZ    24.09\n\n\
+   HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{B2}\n\
+  \    DisplayName    REG_EXPAND_SZ    GitHub CLI\n\
+  \    DisplayVersion    REG_DWORD    0x1\n\n\
+   HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{C3}\n\
+  \    DisplayVersion    REG_SZ    9.9\n"
 ;;
 
 let reg () =
