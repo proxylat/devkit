@@ -90,7 +90,9 @@ let scan () =
     | "cargo" -> Some "rg v14.1.0:\n"
     | _ -> None
   in
-  let apps = Inventory.scan_all run ~winget:(fun () -> Some winget_table) ~extra:[] in
+  let apps =
+    Inventory.scan_all run ~winget:(fun () -> Some winget_table) ~extra:[] ()
+  in
   check_apps
     "scan order and tags"
     [ Dashboard.{ name = "Brave.Brave"; version = "1.80.122"; pm = "winget" }
@@ -122,6 +124,87 @@ let memo_failure () =
   Alcotest.(check (option string)) "missing winget" None (fetch "")
 ;;
 
+let reg_out =
+  "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{A1}\n    DisplayName    REG_SZ    7-Zip 24.09\n    DisplayVersion    REG_SZ    24.09\n\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{B2}\n    DisplayName    REG_EXPAND_SZ    GitHub CLI\n    DisplayVersion    REG_DWORD    0x1\n\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{C3}\n    DisplayVersion    REG_SZ    9.9\n"
+;;
+
+let reg () =
+  (* SZ + EXPAND_SZ names kept, DWORD versions dropped, nameless
+     entries skipped. *)
+  check_apps
+    "reg rows"
+    [ Dashboard.{ name = "7-Zip 24.09"; version = "24.09"; pm = "registry" }
+    ; Dashboard.{ name = "GitHub CLI"; version = ""; pm = "registry" }
+    ]
+    (Inventory.parse_reg reg_out)
+;;
+
+let reg_gated_off_windows () =
+  (* Listed but off Windows: silently skipped, never spawned. *)
+  let spawns = ref [] in
+  let run prog _args =
+    spawns := prog :: !spawns;
+    None
+  in
+  let apps =
+    Inventory.scan_all
+      run
+      ~winget:(fun () -> None)
+      ~extra:[]
+      ~os:"Unix"
+      ~sources:[ "registry"; "npm" ]
+      ()
+  in
+  check_apps "no registry rows off windows" [] apps;
+  Alcotest.(check bool) "reg never spawned" false (List.mem "reg" !spawns)
+;;
+
+let reg_unlisted () =
+  (* On Windows but unlisted: skipped, never spawned. *)
+  let spawns = ref [] in
+  let run prog _args =
+    spawns := prog :: !spawns;
+    None
+  in
+  let apps =
+    Inventory.scan_all
+      run
+      ~winget:(fun () -> None)
+      ~extra:[]
+      ~os:"Win32"
+      ~sources:[ "npm" ]
+      ()
+  in
+  check_apps "unlisted source skipped" [] apps;
+  Alcotest.(check bool) "reg never spawned" false (List.mem "reg" !spawns)
+;;
+
+let reg_order () =
+  (* Sources order is scan order; each hive scans once, names dedupe. *)
+  let run prog _args =
+    match prog with
+    | "reg" -> Some reg_out
+    | "npm" -> Some "npm@10.9.0\n"
+    | _ -> None
+  in
+  let apps =
+    Inventory.scan_all
+      run
+      ~winget:(fun () -> None)
+      ~extra:[]
+      ~os:"Win32"
+      ~sources:[ "npm"; "registry" ]
+      ()
+  in
+  check_apps
+    "sources order"
+    [ Dashboard.{ name = "npm"; version = "10.9.0"; pm = "npm" }
+    ; Dashboard.{ name = "7-Zip 24.09"; version = "24.09"; pm = "registry" }
+    ; Dashboard.{ name = "GitHub CLI"; version = ""; pm = "registry" }
+    ]
+    apps
+;;
+
 let () =
   Alcotest.run
     "inventory"
@@ -139,6 +222,12 @@ let () =
       , [ Alcotest.test_case "scan_all" `Quick scan
         ; Alcotest.test_case "winget memo" `Quick memo
         ; Alcotest.test_case "winget missing" `Quick memo_failure
+        ] )
+    ; ( "registry"
+      , [ Alcotest.test_case "parse" `Quick reg
+        ; Alcotest.test_case "gated off windows" `Quick reg_gated_off_windows
+        ; Alcotest.test_case "unlisted skipped" `Quick reg_unlisted
+        ; Alcotest.test_case "sources order" `Quick reg_order
         ] )
     ]
 ;;

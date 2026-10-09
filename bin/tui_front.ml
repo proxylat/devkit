@@ -93,6 +93,7 @@ let kind_of : Manifest.item_type -> string = function
   | Manifest.GitLab _ -> "gitlab"
   | Manifest.Forgejo _ -> "forgejo"
   | Manifest.Url -> "url"
+  | Manifest.Registry -> "registry"
   | Manifest.Pm s -> s
 ;;
 
@@ -168,7 +169,9 @@ let draw_all (term : LTerm.t) (st : Tui.state) : unit Lwt.t =
 ;;
 
 let empty_scan_message (s : App.scan) : string option =
-  if s.App.apps <> []
+  if s.App.sources_error <> ""
+  then Some ("bad sources; " ^ s.App.sources_error)
+  else if s.App.apps <> []
   then None
   else if s.App.winget <> ""
   then Some ("empty scan; winget at " ^ s.App.winget)
@@ -185,8 +188,8 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
   prerr_endline "scanning installed software...";
   flush stderr;
   let do_scan () =
-    let sections, winget_path = App.load_manifest env.App.fs Manifest.filename in
-    let s = App.scan env ~override_path:winget_path ~extra:tools in
+    let sections, winget_path, sources = App.load_manifest env.App.fs Manifest.filename in
+    let s = App.scan env ~override_path:winget_path ~extra:tools ~sources () in
     let show id =
       match App.winget_show env.App.bio s.App.winget id with
       | "" -> None
@@ -304,14 +307,16 @@ let run ~(tools : Plugin.tool list) (env : App.env) : unit =
      runs (and piped stdin) never pause. *)
     if s.App.apps = []
     then (
-      let winget =
-        if s.App.winget <> ""
+      let diag =
+        if s.App.sources_error <> ""
+        then "sources error: " ^ s.App.sources_error
+        else if s.App.winget <> ""
         then "winget: " ^ s.App.winget
         else if s.App.winget_error <> ""
         then "winget error: " ^ s.App.winget_error
         else "winget: not found"
       in
-      print_endline ("  no installed software found\n  " ^ winget);
+      print_endline ("  no installed software found\n  " ^ diag);
       try
         if Unix.isatty Unix.stdin
         then (

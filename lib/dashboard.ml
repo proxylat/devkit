@@ -77,9 +77,36 @@ let candidates (it : item) : string list =
     | Url ->
       let file = cut_at [ '?'; '#' ] (after_last [ '/'; '\\' ] v) in
       [ file; strip_ext file ]
+    | Registry ->
+      (* Display names carry spaces and never match scan keys or PATH
+         entries; the token rescue below handles them. *)
+      []
     | Winget | GitHub | GitLab _ | Forgejo _ | Pm _ -> [ after_last [ '.'; '/'; '\\' ] v ]
   in
   List.sort_uniq String.compare (List.filter (fun s -> s <> "") (v :: shorts))
+;;
+
+(** Word tokens: lowercase alphanumeric runs. Registry [DisplayName]s
+    ("VLC media player") and manifest nicks ("vlc") meet here. *)
+let toks_of_words (s : string) : string list =
+  s
+  |> String.lowercase_ascii
+  |> String.map (fun c ->
+    if ('a' <= c && c <= 'z') || ('0' <= c && c <= '9') then c else ' ')
+  |> String.split_on_char ' '
+  |> List.filter (fun w -> w <> "")
+;;
+
+(** Short matchable form: the id tail for repo/winget rows, the file
+    stem for links. ["VideoLAN.VLC" → "vlc"]. *)
+let nick (it : item) : string =
+  match it.typ with
+  | Url -> strip_ext (cut_at [ '?'; '#' ] (after_last [ '/'; '\\' ] it.value))
+  | _ -> after_last [ '.'; '/'; '\\' ] it.value
+;;
+
+let subset (small : string list) (big : string list) : bool =
+  small <> [] && List.for_all (fun t -> List.mem t big) small
 ;;
 
 (** Merge the machine scan with manifest sections into dashboard sections:
@@ -107,7 +134,20 @@ let build_sections
   =
   let lower s = String.lowercase_ascii s in
   let scan_lookup : (string, app) Hashtbl.t = Hashtbl.create 64 in
-  List.iter (fun a -> Hashtbl.replace scan_lookup (lower a.name) a) apps;
+  (* [apps] arrives in sources order; earliest source wins ties, so the
+     manifest's order picks the label. *)
+  List.iter (fun a -> Hashtbl.replace scan_lookup (lower a.name) a) (List.rev apps);
+  (* Registry word index for the token rescue below. *)
+  let reg_idx : (string list * app) list =
+    List.filter_map
+      (fun (a : app) ->
+         if a.pm = "registry" then Some (toks_of_words a.name, a) else None)
+      apps
+  in
+  let reg_hit (it : item) : app option =
+    let small = toks_of_words (nick it) in
+    List.find_map (fun (toks, a) -> if subset small toks then Some a else None) reg_idx
+  in
   (* PATH probe: one spawn over every candidate of every manifest item.
      Skipped entirely when no runner is passed (tests, offline use). *)
   let on_path : (string, unit) Hashtbl.t = Hashtbl.create 64 in
@@ -156,7 +196,7 @@ let build_sections
                            }
                          else { it with status = Installed }
                        | None -> { it with status = NotFound })
-                    | GitHub | GitLab _ | Forgejo _ | Url | Pm _ ->
+                    | GitHub | GitLab _ | Forgejo _ | Url | Pm _ | Registry ->
                       { it with status = Manual }
                   in
                   let it =
@@ -165,7 +205,12 @@ let build_sections
                       match scan_hit it with
                       | Some a ->
                         { it with installed_version = a.version; status = Installed }
-                      | None -> if path_hit it then { it with status = Installed } else it)
+                      | None ->
+                        (match reg_hit it with
+                         | Some a ->
+                           { it with installed_version = a.version; status = Installed }
+                         | None ->
+                           if path_hit it then { it with status = Installed } else it))
                     else it
                   in
                   if it.typ = Winget && it.status = Installed
@@ -369,6 +414,40 @@ let build_sections
                  }
                  :: !new_items)))
        ids);
+  (* 5b. Registry orphans: uninstall entries matching no manifest row
+     join Newly detected as discovery-only [Registry] rows (they carry
+     no install id, so append/export skip them). Suppressed when the
+     entry already covers a manifest row or a winget orphan — same
+     token rule as the rescue, so one machine app yields one row. *)
+  let man_nicks =
+    List.concat_map
+      (fun sec -> List.map (fun it -> toks_of_words (nick it)) sec.items)
+      pkgs_sections
+  in
+  let new_nicks = List.map (fun it -> toks_of_words (nick it)) !new_items in
+  List.iter
+    (fun (a : app) ->
+       if a.pm <> "registry"
+       then ()
+       else (
+         let toks = toks_of_words a.name in
+         let covered =
+           Hashtbl.mem pkg_names (lower a.name)
+           || List.exists (fun small -> subset small toks) man_nicks
+           || List.exists (fun small -> subset small toks) new_nicks
+         in
+         if not covered
+         then
+           new_items
+           := { typ = Registry
+              ; value = a.name
+              ; installed_version = a.version
+              ; available_version = ""
+              ; status = New
+              ; upstream = ""
+              }
+              :: !new_items))
+    apps;
   let new_items = List.rev !new_items in
   (* 6. Final order, minus the raw "winget" artifact section.
      man_rest was consed in section order, so it is reversed back here.

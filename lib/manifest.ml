@@ -13,7 +13,9 @@
     ([gitlab:https://host/group/project]) since no static rule can tell
     them apart. A leftover [pm] key is also rejected. A package may also carry [upstream]: version
     truth and downloads then come from the vendor's releases instead of
-    the community manifest. Parsing is total: malformed TOML yields an
+    the community manifest. A top-level [sources] array selects the scan
+    sources in order (["registry" first wins ties); missing means
+    {!default_sources}. Parsing is total: malformed TOML yields an
     empty result, rejected rows are skipped with a [warnings] entry
     naming the fix. Statuses are never persisted; they are assigned at
     runtime by the merge step. *)
@@ -27,6 +29,7 @@ type item_type =
   | Forgejo of string (** forge host, always explicit, e.g. ["codeberg.org"] *)
   | Url
   | Pm of string
+  | Registry (** Windows uninstall entry: discovery-only, never persisted *)
 
 type status =
   | Installed
@@ -53,7 +56,11 @@ type parse_result =
   { sections : section list
   ; winget_path : string
   ; warnings : string list (** skipped rows, in document order, naming the fix *)
+  ; sources : string list (** scan sources in order; {!default_sources} when unset *)
   }
+
+(** Scan sources when the manifest sets none: classic order, registry last. *)
+let default_sources = [ "winget"; "npm"; "pipx"; "uv"; "cargo"; "registry" ]
 
 let make_item typ value =
   { typ
@@ -74,6 +81,7 @@ let type_string = function
   | Forgejo _ -> "forgejo"
   | Url -> "url"
   | Pm s -> s
+  | Registry -> "registry"
 ;;
 
 let item_type_of_string s =
@@ -84,6 +92,7 @@ let item_type_of_string s =
   | "forgejo" | "gitea" -> Forgejo "codeberg.org"
   | "codeberg" -> Forgejo "codeberg.org"
   | "url" -> Url
+  | "registry" -> Registry
   | _ -> Pm s
 ;;
 
@@ -187,9 +196,15 @@ let classify (id : string) : (item_type * string, string) result =
 (** [parse text] parses a devkit.toml manifest. *)
 let parse (text : string) : parse_result =
   match Toml.Parser.from_string text with
-  | `Error _ -> { sections = []; winget_path = ""; warnings = [] }
+  | `Error _ ->
+    { sections = []; winget_path = ""; warnings = []; sources = default_sources }
   | `Ok tbl ->
     let winget_path = get_str tbl "winget_path" in
+    let sources =
+      match get tbl (key "sources" |-- array |-- strings) with
+      | Some (_ :: _ as ss) -> ss
+      | _ -> default_sources
+    in
     let warnings = ref [] in
     let skipped id reason =
       warnings := Printf.sprintf "package %S skipped: %s" id reason :: !warnings
@@ -239,10 +254,11 @@ let parse (text : string) : parse_result =
                Some { name; items }))
           secs
     in
-    { sections; winget_path; warnings = List.rev !warnings }
+    { sections; winget_path; warnings = List.rev !warnings; sources }
 ;;
 
 let str k v = Toml.Min.key k, Toml.Types.TString v
+let str_list k vs = Toml.Min.key k, Toml.Types.TArray (Toml.Types.NodeString vs)
 
 (** [to_string r] renders a manifest back to TOML. *)
 let to_string (r : parse_result) : string =
@@ -258,6 +274,7 @@ let to_string (r : parse_result) : string =
       then "codeberg:" ^ it.value
       else "forgejo:https://" ^ h ^ "/" ^ it.value
     | Pm p -> p ^ ":" ^ it.value
+    | Registry -> "registry:" ^ it.value
   in
   let pkg it =
     Toml.Min.of_key_values
@@ -280,6 +297,13 @@ let to_string (r : parse_result) : string =
   in
   let top =
     (if r.winget_path <> "" then [ str "winget_path" r.winget_path ] else [])
+    (* Fragments (append) carry [sources = []] and must not emit the key:
+       a duplicate top-level key would invalidate the manifest. Defaults
+       are omitted too: emitting them would pin today's order against
+       future additions. *)
+    @ (if r.sources <> [] && r.sources <> default_sources
+       then [ str_list "sources" r.sources ]
+       else [])
     @ [ ( Toml.Min.key "section"
         , Toml.Types.TArray (Toml.Types.NodeTable (List.map sec r.sections)) )
       ]

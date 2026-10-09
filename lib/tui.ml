@@ -95,8 +95,9 @@ let selected (s : state) : entry option = List.nth_opt s.entries s.cursor
 
 (** What Enter does on the cursor row: installable statuses run the
     installer; Url rows always open the link; installed or manual forge
-    rows (GitHub, GitLab, Forgejo) open the repo page; anything else is
-    a no-op. [Do_open] carries the row item for reporting plus the URL
+    rows (GitHub, GitLab, Forgejo) open the repo page; registry rows are
+    discovery-only, so Enter never acts on them; anything else is a
+    no-op. [Do_open] carries the row item for reporting plus the URL
     to open. *)
 type enter =
   | Do_install of item
@@ -109,6 +110,7 @@ let enter_action (s : state) : enter =
   | Some e ->
     let it = e.item in
     (match it.typ, it.status with
+     | Manifest.Registry, _ -> Do_nothing
      | _, (NeedsUpdate | NotFound) -> Do_install it
      | Manifest.Url, _ -> Do_open (it, it.value)
      | Manifest.GitHub, _ -> Do_open (it, Install.repo_page it.value)

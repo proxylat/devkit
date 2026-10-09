@@ -57,9 +57,79 @@ let contains sub s =
 ;;
 
 let load_missing () =
-  let s, w = App.load_manifest (mem_fs (Hashtbl.create 1)) Manifest.filename in
+  let s, w, _ = App.load_manifest (mem_fs (Hashtbl.create 1)) Manifest.filename in
   Alcotest.(check int) "no sections" 0 (List.length s);
   Alcotest.(check string) "no winget path" "" w
+;;
+
+let resolve () =
+  Alcotest.(check (result (list string) string))
+    "canonical spellings"
+    (Ok [ "winget"; "npm" ])
+    (App.resolve_sources [ "Winget"; "NPM" ] ~tools:[]);
+  (match App.resolve_sources [] ~tools:[] with
+   | Ok srcs ->
+     Alcotest.(check (list string)) "empty means defaults" Manifest.default_sources srcs
+   | Error _ -> Alcotest.fail "empty should resolve");
+  match App.resolve_sources [ "winget"; "bogus" ] ~tools:[] with
+  | Ok _ -> Alcotest.fail "unknown should error"
+  | Error e ->
+    Alcotest.(check bool) "names source" true (contains "unknown source: bogus" e);
+    Alcotest.(check bool) "lists known" true (contains "winget" e)
+;;
+
+let bad_sources () =
+  (* sources=["bogus"]: manifest-driven commands fail before spawning
+     anything. run_export is exempt: it scans with ~sources:[] (a full
+     snapshot, filtered by --only/--except), so a bad key cannot break it. *)
+  let files = Hashtbl.create 1 in
+  Hashtbl.add files Manifest.filename "sources = [\"bogus\"]\n";
+  let e = env files in
+  Alcotest.(check bool)
+    "add errors"
+    true
+    (match App.run_add e [ "Git.Git" ] with
+     | [ m ] -> contains "unknown source: bogus" m
+     | _ -> false);
+  Alcotest.(check bool)
+    "default shows error"
+    true
+    (contains "error: unknown source: bogus" (App.default_view ~tools:[] e))
+;;
+
+let win_reg_out =
+  "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{A1}\n\
+  \    DisplayName    REG_SZ    7-Zip 24.09\n\
+  \    DisplayVersion    REG_SZ    24.09\n\n\
+   HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{B2}\n\
+  \    DisplayName    REG_SZ    GitHub CLI\n\
+  \    DisplayVersion    REG_SZ    2.62.0\n"
+;;
+
+let win_env files =
+  { (env files) with
+    run = (fun prog _ -> if prog = "reg" then Some win_reg_out else None)
+  }
+;;
+
+let append_registry_note () =
+  (* Simulated Windows scan: the only rows are registry orphans, which
+     stay in the table but never persist. *)
+  let files = Hashtbl.create 1 in
+  Alcotest.(check (list string))
+    "orphans noted, nothing appended"
+    [ "  nothing new to append"; "  2 registry row(s) need manual ids" ]
+    (App.run_append (win_env files) ~os:"Win32" []);
+  Alcotest.(check bool) "no write" false (Hashtbl.mem files Manifest.filename)
+;;
+
+let export_registry_note () =
+  let files = Hashtbl.create 1 in
+  Alcotest.(check (list string))
+    "registry skipped with note"
+    [ "  no installed software found"; "  2 registry app(s) skipped (need manual ids)" ]
+    (App.run_export (win_env files) ~os:"Win32" "out.toml");
+  Alcotest.(check bool) "no toml written" false (Hashtbl.mem files "out.toml")
 ;;
 
 let load_parses () =
@@ -72,7 +142,7 @@ let load_parses () =
      name = \"tools\"\n\n\
      [[section.package]]\n\
      id = \"Git.Git\"\n";
-  let s, w = App.load_manifest (mem_fs files) Manifest.filename in
+  let s, w, _ = App.load_manifest (mem_fs files) Manifest.filename in
   Alcotest.(check string) "winget path" "C:\\w\\winget.exe" w;
   Alcotest.(check int) "one section" 1 (List.length s)
 ;;
@@ -316,7 +386,7 @@ let default_gitlab () =
 ;;
 
 let scan_error () =
-  let s = App.scan (env (Hashtbl.create 1)) ~override_path:"" ~extra:[] in
+  let s = App.scan (env (Hashtbl.create 1)) ~override_path:"" ~extra:[] ~sources:[] () in
   Alcotest.(check string) "no winget" "" s.App.winget;
   Alcotest.(check bool) "error carried" true (s.App.winget_error <> "")
 ;;
@@ -339,6 +409,7 @@ let () =
     [ ( "manifest"
       , [ Alcotest.test_case "missing" `Quick load_missing
         ; Alcotest.test_case "parses" `Quick load_parses
+        ; Alcotest.test_case "resolve" `Quick resolve
         ] )
     ; ( "append"
       , [ Alcotest.test_case "groups" `Quick append_groups
@@ -357,6 +428,9 @@ let () =
         ; Alcotest.test_case "default" `Quick default
         ; Alcotest.test_case "default upstream" `Quick default_upstream
         ; Alcotest.test_case "default gitlab" `Quick default_gitlab
+        ; Alcotest.test_case "bad sources" `Quick bad_sources
+        ; Alcotest.test_case "append registry note" `Quick append_registry_note
+        ; Alcotest.test_case "export registry note" `Quick export_registry_note
         ; Alcotest.test_case "scan error" `Quick scan_error
         ; Alcotest.test_case "default empty" `Quick default_empty
         ] )

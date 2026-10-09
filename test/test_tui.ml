@@ -114,6 +114,23 @@ let enter_opens_links () =
   | _ -> Alcotest.fail "installed winget is noop"
 ;;
 
+let enter_registry_noop () =
+  (* Registry rows are discovery-only: Enter never acts on them, in any
+     status. Installed (not New) so the row is actually an entry. *)
+  let s =
+    Tui.make
+      [ { Manifest.name = "t"
+        ; items = [ litem Manifest.Registry Manifest.Installed "GitHub CLI" ]
+        }
+      ]
+      ~height:10
+      ~width:80
+  in
+  match Tui.enter_action s with
+  | Tui.Do_nothing -> ()
+  | _ -> Alcotest.fail "registry rows are not actionable"
+;;
+
 let open_keeps_status () =
   (* Opening a link must not demote an installed row to manual. *)
   let s =
@@ -297,6 +314,7 @@ let () =
       , [ Alcotest.test_case "mapping" `Quick enter_mapping
         ; Alcotest.test_case "notfound" `Quick enter_notfound
         ; Alcotest.test_case "opens links" `Quick enter_opens_links
+        ; Alcotest.test_case "registry noop" `Quick enter_registry_noop
         ] )
     ; ( "outcome"
       , [ Alcotest.test_case "success" `Quick apply_success

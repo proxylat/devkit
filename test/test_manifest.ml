@@ -175,6 +175,31 @@ let malformed () =
   Alcotest.(check int) "no warnings" 0 (List.length r.warnings)
 ;;
 
+let sources () =
+  let r =
+    parse
+      "sources = [\"registry\", \"npm\", \"winget\"]\n\n\
+       [[section]]\n\
+       name = \"t\"\n\n\
+       [[section.package]]\n\
+       id = \"Git.Git\"\n"
+  in
+  Alcotest.(check (list string)) "order kept" [ "registry"; "npm"; "winget" ] r.sources;
+  let missing = parse "[[section]]\nname = \"t\"\n" in
+  Alcotest.(check (list string)) "absent means defaults" default_sources missing.sources;
+  let text = to_string r in
+  Alcotest.(check bool) "key emitted" true (contains "sources" text);
+  let r2 = parse text in
+  Alcotest.(check (list string)) "round trip" r.sources r2.sources;
+  let plain =
+    parse "[[section]]\nname = \"t\"\n\n[[section.package]]\nid = \"Git.Git\"\n"
+  in
+  Alcotest.(check bool)
+    "default key not emitted"
+    false
+    (contains "sources" (to_string plain))
+;;
+
 let round_trip () =
   let r = parse basic in
   let text = to_string r in
@@ -204,6 +229,7 @@ let () =
         ; Alcotest.test_case "pm gone" `Quick pm_gone
         ; Alcotest.test_case "skips" `Quick skips
         ; Alcotest.test_case "malformed" `Quick malformed
+        ; Alcotest.test_case "sources" `Quick sources
         ] )
     ; "render", [ Alcotest.test_case "round_trip" `Quick round_trip ]
     ]

@@ -5,13 +5,21 @@ val parse_pipx : string -> Dashboard.app list
 val parse_uv : string -> Dashboard.app list
 val parse_cargo : string -> Dashboard.app list
 val parse_winget : string -> Dashboard.app list
+val parse_reg : string -> Dashboard.app list
 
-(** Full scan order: winget, npm, pipx, uv, cargo, then [extra] custom
-    tools in file order. [winget] is the memoized [winget list] fetch. *)
+(** Windows uninstall sweep: machine + 32-bit view + current user. *)
+val scan_reg : Proc.runner -> Dashboard.app list
+
+(** Full scan order follows [sources] (default: {!Manifest.default_sources});
+    [registry] only spawns on Windows. [winget] is the memoized
+    [winget list] fetch. *)
 val scan_all
   :  Proc.runner
   -> winget:(unit -> string option)
   -> extra:Plugin.tool list
+  -> ?os:string
+  -> ?sources:string list
+  -> unit
   -> Dashboard.app list
 
 (** The five built-ins as plugin entries (scan order). *)

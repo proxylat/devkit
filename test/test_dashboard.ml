@@ -386,6 +386,70 @@ let upstream_all_pms () =
   | _ -> Alcotest.fail "prettier should be Installed"
 ;;
 
+let reg_app name version = Dashboard.{ name; version; pm = "registry" }
+
+let reg_rescue () =
+  (* "GitHub CLI 2.62.0" carries the token [cli], the manifest nick of
+     github:owner/cli — the row is confirmed installed with the
+     registry's version, no PATH probe involved. *)
+  let manifest = [ { name = "Tools"; items = [ item GitHub "owner/cli" ] } ] in
+  let apps = [ reg_app "GitHub CLI" "2.62.0" ] in
+  let sections = Dashboard.build_sections apps manifest None in
+  Alcotest.(check int) "one section" 1 (List.length sections);
+  Alcotest.(check string) "installed last" "Installed" (List.nth sections 0).name;
+  let it = List.nth (List.nth sections 0).items 0 in
+  Alcotest.(check string) "version carried" "2.62.0" it.installed_version;
+  match it.status with
+  | Installed -> ()
+  | _ -> Alcotest.fail "registry token hit should be Installed"
+;;
+
+let reg_negative () =
+  (* [gizmo] is no token of "GitHub CLI": the row stays Manual in its
+     own section, and no Newly detected section appears. *)
+  let manifest = [ { name = "Tools"; items = [ item GitHub "owner/gizmo" ] } ] in
+  let apps = [ reg_app "GitHub CLI" "2.62.0" ] in
+  let sections = Dashboard.build_sections apps manifest None in
+  Alcotest.(check int) "two sections" 2 (List.length sections);
+  Alcotest.(check string) "newly first" "Newly detected" (List.nth sections 0).name;
+  Alcotest.(check string) "manifest kept" "Tools" (List.nth sections 1).name;
+  let it = List.nth (List.nth sections 1).items 0 in
+  match it.status with
+  | Manual -> ()
+  | _ -> Alcotest.fail "token miss should stay Manual"
+;;
+
+let reg_orphans () =
+  (* No manifest row matches: the entry joins Newly detected as a
+     discovery-only Registry row carrying its version. *)
+  let apps = [ reg_app "GitHub CLI" "2.62.0" ] in
+  let sections = Dashboard.build_sections apps [] None in
+  Alcotest.(check int) "one section" 1 (List.length sections);
+  Alcotest.(check string) "newly detected" "Newly detected" (List.nth sections 0).name;
+  let it = List.nth (List.nth sections 0).items 0 in
+  Alcotest.(check string) "name kept" "GitHub CLI" it.value;
+  Alcotest.(check string) "version carried" "2.62.0" it.installed_version;
+  Alcotest.(check bool) "registry typ" true (it.typ = Registry);
+  match it.status with
+  | New -> ()
+  | _ -> Alcotest.fail "orphan should be New"
+;;
+
+let reg_orphan_suppressed () =
+  (* The same token rule that rescues the manifest row also suppresses
+     the orphan: one machine app yields one row, in Installed. *)
+  let manifest = [ { name = "Tools"; items = [ item Winget "VideoLAN.VLC" ] } ] in
+  let apps = [ reg_app "VLC media player" "3.0.20" ] in
+  let sections = Dashboard.build_sections apps manifest None in
+  Alcotest.(check int) "one section" 1 (List.length sections);
+  Alcotest.(check string) "installed last" "Installed" (List.nth sections 0).name;
+  let it = List.nth (List.nth sections 0).items 0 in
+  Alcotest.(check string) "version carried" "3.0.20" it.installed_version;
+  match it.status with
+  | Installed -> ()
+  | _ -> Alcotest.fail "covered orphan should not duplicate"
+;;
+
 let () =
   Alcotest.run
     "dashboard"
@@ -404,6 +468,10 @@ let () =
             upstream_offline_keeps_winget
         ; Alcotest.test_case "upstream all pms" `Quick upstream_all_pms
         ; Alcotest.test_case "url stem match" `Quick url_stem_match
+        ; Alcotest.test_case "registry rescue" `Quick reg_rescue
+        ; Alcotest.test_case "registry negative" `Quick reg_negative
+        ; Alcotest.test_case "registry orphans" `Quick reg_orphans
+        ; Alcotest.test_case "registry orphan suppressed" `Quick reg_orphan_suppressed
         ; Alcotest.test_case "PATH probe rescue" `Quick path_probe_rescue
         ; Alcotest.test_case "PATH probe miss" `Quick path_probe_miss
         ] )

@@ -10,6 +10,7 @@ type item_type =
   | Forgejo of string (** forge host, always explicit, e.g. ["codeberg.org"] *)
   | Url
   | Pm of string
+  | Registry (** Windows uninstall entry: discovery-only, never persisted *)
 
 type status =
   | Installed
@@ -37,7 +38,11 @@ type parse_result =
   { sections : section list
   ; winget_path : string
   ; warnings : string list (** skipped rows, in document order, naming the fix *)
+  ; sources : string list (** scan sources in order; {!default_sources} when unset *)
   }
+
+(** Scan sources when the manifest sets none: classic order, registry last. *)
+val default_sources : string list
 
 val make_item : item_type -> string -> item
 val type_string : item_type -> string

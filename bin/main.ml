@@ -111,7 +111,7 @@ let append_cmd =
     let tools = load_tools () in
     print_lines
       (if is_new
-       then App.run_append_new ~tools (make_env ())
+       then App.run_append_new ~tools (make_env ()) ()
        else App.run_append ~tools (make_env ()) ids)
   in
   Cmdliner.Cmd.v

@@ -6,7 +6,11 @@
     Parser edge cases (each tested):
     - pipx versions lose their trailing comma.
     - cargo versions lose the ["vX.Y.Z:"] trailing colon.
-    - uv ([uv tool list]) scans like pipx. *)
+    - uv ([uv tool list]) scans like pipx.
+    - registry ([reg query … /s]): entries split on blank lines;
+      [DisplayName] without [DisplayVersion] keeps [""]; entries without
+      [DisplayName] and non-string value types are skipped; multi-word
+      data rejoins on single spaces. *)
 
 open Dashboard
 
@@ -142,6 +146,43 @@ let parse_cargo (output : string) : app list =
     (lines_of output)
 ;;
 
+(** [reg query <key> /s]: one app per [DisplayName] ([pm] =
+    ["registry"]). Key headers and value types ride along ignored: only
+    string ([REG_SZ]/[REG_EXPAND_SZ]) [DisplayName]/[DisplayVersion]
+    lines matter. *)
+let parse_reg (output : string) : app list =
+  let entries = ref [] in
+  let cur = ref [] in
+  let flush () =
+    if !cur <> [] then entries := List.rev !cur :: !entries;
+    cur := []
+  in
+  List.iter
+    (fun raw ->
+       if String.trim raw = "" then flush () else cur := raw :: !cur)
+    (lines_of output);
+  flush ();
+  List.filter_map
+    (fun lines ->
+       let name = ref "" in
+       let ver = ref "" in
+       List.iter
+         (fun raw ->
+            match fields (String.trim raw) with
+            | key :: typ :: rest
+              when rest <> []
+                   && (typ = "REG_SZ" || typ = "REG_EXPAND_SZ") ->
+              let data = String.concat " " rest in
+              (match String.lowercase_ascii key with
+               | "displayname" -> name := data
+               | "displayversion" -> ver := data
+               | _ -> ())
+            | _ -> ())
+         lines;
+       if !name = "" then None else Some { name = !name; version = !ver; pm = "registry" })
+    (List.rev !entries)
+;;
+
 (** winget rows via {!Winget_parse}; the Go scanner keys these by id and so
     do we ([Name] is the id column). Sorted by id for deterministic output.
     Go preserved winget's row order, but every consumer only needs lookup. *)
@@ -238,8 +279,10 @@ let built_ins : Plugin.tool list =
 ;;
 
 (** Names that custom tools may not take (shadowing would silently
-    change a built-in scan). *)
-let reserved_names : string list = List.map (fun (t : Plugin.tool) -> t.name) built_ins
+    change a built-in scan). [registry] is reserved although it scans
+    bespoke (three hives, one sweep): a custom tool under that name
+    would hijack the sources toggle and the install skip. *)
+let reserved_names : string list = "registry" :: List.map (fun (t : Plugin.tool) -> t.name) built_ins
 
 (** Run one plugin tool: missing binary (or failure) means skipped, as
     with every built-in scanner. *)
@@ -249,29 +292,93 @@ let scan_tool (run : Proc.runner) (t : Plugin.tool) : app list =
   | Some out -> t.parse out
 ;;
 
-(** Full scan order: winget, npm, pipx, uv, cargo, then [extra] custom
-    tools in file order. The winget fetch runs on its own domain while
-    the rest scan in parallel, so startup costs max(winget, slowest
-    other) instead of the sum. [winget] is the memoized [winget list]
-    fetch ([Proc.winget_list]), so a scan followed by an update check
-    spawns winget once per window. *)
+(** Windows uninstall sweep: machine + 32-bit view + current user.
+    One spawn per hive; a missing hive (or failure) contributes nothing.
+    Deduped by lowercase name, hive order wins. *)
+let scan_reg (run : Proc.runner) : app list =
+  let hives =
+    [ "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+    ; "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+    ; "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"
+    ]
+  in
+  let apps =
+    List.concat_map
+      (fun hive ->
+         match run "reg" [ "query"; hive; "/s" ] with
+         | None -> []
+         | Some out -> parse_reg out)
+      hives
+  in
+  let seen = Hashtbl.create 64 in
+  List.filter
+    (fun (a : app) ->
+       let k = String.lowercase_ascii a.name in
+       if Hashtbl.mem seen k then false else (Hashtbl.replace seen k (); true))
+    apps
+;;
+
+(** Order-preserving dedup: repeated source names scan once. *)
+let dedup (xs : string list) : string list =
+  let seen = Hashtbl.create 8 in
+  List.filter
+    (fun x ->
+       if Hashtbl.mem seen x then false else (Hashtbl.replace seen x (); true))
+    xs
+;;
+
+(** Full scan order follows [sources]: winget, npm, pipx, uv, cargo,
+    registry, then [extra] custom tools in file order — each slotted
+    where its name appears (unknown names are ignored here; {!App}
+    rejects them before the scan starts). The winget fetch runs on its
+    own domain while the rest scan in parallel, so startup costs
+    max(winget, slowest other) instead of the sum. [winget] is the
+    memoized [winget list] fetch ([Proc.winget_list]), so a scan
+    followed by an update check spawns winget once per window.
+    [registry] only spawns on Windows ([reg] exists nowhere else). *)
 let scan_all
       (run : Proc.runner)
       ~(winget : unit -> string option)
       ~(extra : Plugin.tool list)
+      ?(os : string = Sys.os_type)
+      ?(sources : string list = Manifest.default_sources)
+      ()
   : app list
   =
+  let sources = dedup sources in
   let winget_dom =
     Domain.spawn (fun () ->
-      match winget () with
-      | None -> []
-      | Some out -> parse_winget out)
+      if not (List.mem "winget" sources)
+      then []
+      else (
+        match winget () with
+        | None -> []
+        | Some out -> parse_winget out))
   in
-  let apps =
-    List.concat
-      (Proc.par_map8
-         (scan_tool run)
-         ([ npm_tool; pipx_tool; uv_tool; cargo_tool ] @ extra))
+  let reg_dom =
+    Domain.spawn (fun () ->
+      if List.mem "registry" sources && os = "Win32" then scan_reg run else [])
   in
-  Domain.join winget_dom @ apps
+  let tool_of name =
+    List.find_opt
+      (fun (t : Plugin.tool) -> t.name = name)
+      ([ npm_tool; pipx_tool; uv_tool; cargo_tool ] @ extra)
+  in
+  let tools = List.filter_map tool_of sources in
+  let tool_apps = Proc.par_map8 (scan_tool run) tools in
+  let winget_apps = Domain.join winget_dom in
+  let reg_apps = Domain.join reg_dom in
+  List.concat_map
+    (fun name ->
+       if name = "winget"
+       then winget_apps
+       else if name = "registry"
+       then reg_apps
+       else (
+         match
+           List.find_opt (fun ((t : Plugin.tool), _) -> t.name = name) (List.combine tools tool_apps)
+         with
+         | Some (_, apps) -> apps
+         | None -> []))
+    sources
 ;;
