@@ -94,9 +94,10 @@ let step (s : state) (a : action) : state =
 let selected (s : state) : entry option = List.nth_opt s.entries s.cursor
 
 (** What Enter does on the cursor row: installable statuses run the
-    installer; Url rows always open the link; installed or manual GitHub
-    rows open the repo page; anything else is a no-op. [Do_open] carries
-    the row item for reporting plus the URL to open. *)
+    installer; Url rows always open the link; installed or manual forge
+    rows (GitHub, GitLab, Forgejo) open the repo page; anything else is
+    a no-op. [Do_open] carries the row item for reporting plus the URL
+    to open. *)
 type enter =
   | Do_install of item
   | Do_open of item * string
@@ -111,6 +112,10 @@ let enter_action (s : state) : enter =
      | _, (NeedsUpdate | NotFound) -> Do_install it
      | Manifest.Url, _ -> Do_open (it, it.value)
      | Manifest.GitHub, _ -> Do_open (it, Install.repo_page it.value)
+     | Manifest.GitLab host, _ ->
+       Do_open (it, Provider.page_url (Provider.GitLab host) it.value)
+     | Manifest.Forgejo host, _ ->
+       Do_open (it, Provider.page_url (Provider.Forgejo host) it.value)
      | _, Manual -> Do_open (it, it.value)
      | _, _ -> Do_nothing)
 ;;

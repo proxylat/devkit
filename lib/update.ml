@@ -130,7 +130,8 @@ let upstream_updates (fetch : Fetch.fetch) (items : item list) : (string * strin
     if it.upstream = "" || it.installed_version = "" || it.status <> Installed
     then None
     else (
-      match Gh.latest_release fetch it.upstream with
+      let prov, repo = Provider.of_upstream it.upstream in
+      match Provider.latest fetch prov repo with
       | Error _ -> None
       | Ok rel ->
         if Strutil.is_newer_version it.installed_version rel.Gh.tag_name

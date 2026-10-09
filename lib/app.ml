@@ -18,7 +18,7 @@
 open Manifest
 open Dashboard
 
-let pm_order = [ "winget"; "npm"; "pipx"; "uv"; "cargo" ]
+let pm_order = [ "winget"; "npm"; "pipx"; "uv"; "cargo"; "gitlab"; "forgejo" ]
 
 type fs =
   { read_file : string -> string option
@@ -94,10 +94,12 @@ let winget_show (bio : Bootstrap.io) (winget : string) (id : string) : string =
       find lines))
 ;;
 
-(** Vendor truth for [upstream] rows: [repo] → latest release tag.
-    [None] on any failure, so the merge keeps the winget reading. *)
-let upstream_ver_of_fetch (fetch : Fetch.fetch) (repo : string) : string option =
-  match Gh.latest_release fetch repo with
+(** Vendor truth for [upstream] rows: [(provider, repo)] → latest
+    release tag. [None] on any failure, so the merge keeps the PM's reading. *)
+let upstream_ver_of_fetch (fetch : Fetch.fetch) (prov : Provider.t) (repo : string)
+  : string option
+  =
+  match Provider.latest fetch prov repo with
   | Ok rel when rel.Gh.tag_name <> "" -> Some rel.Gh.tag_name
   | _ -> None
 ;;

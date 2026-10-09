@@ -17,7 +17,11 @@ let basic =
    [[section.package]]\n\
    id = \"owner/repo\"\n\n\
    [[section.package]]\n\
-   id = \"https://example.com/dl/widget-2.0.exe\"\n"
+   id = \"https://example.com/dl/widget-2.0.exe\"\n\n\
+   [[section.package]]\n\
+   id = \"gitlab:group/proj\"\n\n\
+   [[section.package]]\n\
+   id = \"forgejo:https://git.example.com/o/r\"\n"
 ;;
 
 let parses () =
@@ -28,7 +32,7 @@ let parses () =
   | [ sec ] ->
     Alcotest.(check string) "section name" "tools" sec.name;
     (match sec.items with
-     | [ git; npm; gh; url ] ->
+     | [ git; npm; gh; url; gl; fj ] ->
        Alcotest.(check string) "first id" "Git.Git" git.value;
        Alcotest.(check bool) "first typ" true (git.typ = Winget);
        Alcotest.(check string) "upstream" "git/git" git.upstream;
@@ -37,8 +41,12 @@ let parses () =
        Alcotest.(check string) "second version" "1.2.3" npm.installed_version;
        Alcotest.(check bool) "third typ" true (gh.typ = GitHub);
        Alcotest.(check string) "third id" "owner/repo" gh.value;
-       Alcotest.(check bool) "fourth typ" true (url.typ = Url)
-     | _ -> Alcotest.fail "expected four items")
+       Alcotest.(check bool) "fourth typ" true (url.typ = Url);
+       Alcotest.(check bool) "gitlab typ" true (gl.typ = GitLab "gitlab.com");
+       Alcotest.(check string) "gitlab id" "group/proj" gl.value;
+       Alcotest.(check bool) "forgejo typ" true (fj.typ = Forgejo "git.example.com");
+       Alcotest.(check string) "forgejo id" "o/r" fj.value
+     | _ -> Alcotest.fail "expected six items")
   | _ -> Alcotest.fail "expected one section"
 ;;
 
@@ -61,6 +69,13 @@ let ladder () =
     ; "o/r", GitHub, "o/r"
     ; "Git.Git", Winget, "Git.Git"
     ; "url:https://x/y.exe", Url, "https://x/y.exe"
+    ; "https://gitlab.com/group/sub/x", GitLab "gitlab.com", "group/sub/x"
+    ; "gitlab:group/x", GitLab "gitlab.com", "group/x"
+    ; "gitlab:https://git.example.com/g/x", GitLab "git.example.com", "g/x"
+    ; "codeberg:o/r", Forgejo "codeberg.org", "o/r"
+    ; "https://codeberg.org/o/r", Forgejo "codeberg.org", "o/r"
+    ; "forgejo:https://git.example.com/o/r", Forgejo "git.example.com", "o/r"
+    ; "gitea:https://git.example.com/o/r", Forgejo "git.example.com", "o/r"
     ]
   in
   List.iter
@@ -89,6 +104,9 @@ let rejections () =
     ; ":x", "empty prefix"
     ; "", "empty id"
     ; "npm:a b", "no spaces or backslashes"
+    ; "forgejo:o/r", "need a host"
+    ; "gitlab:onlyone", "group/project"
+    ; "codeberg:a/b/c", "owner/repo"
     ]
   in
   List.iter
@@ -162,6 +180,11 @@ let round_trip () =
   let text = to_string r in
   Alcotest.(check bool) "no pm key" false (contains "pm =" text);
   Alcotest.(check bool) "prefixed npm" true (contains "npm:pyright" text);
+  Alcotest.(check bool) "prefixed gitlab" true (contains "gitlab:group/proj" text);
+  Alcotest.(check bool)
+    "prefixed forgejo url"
+    true
+    (contains "forgejo:https://git.example.com/o/r" text);
   let r2 = parse text in
   Alcotest.(check string) "winget path" r.winget_path r2.winget_path;
   Alcotest.(check int) "sections" (List.length r.sections) (List.length r2.sections);

@@ -46,7 +46,7 @@ type deps =
   { winget : unit -> string
   ; spawn : Bootstrap.spawn
   ; open_browser : string -> (unit, string) result
-  ; latest_release : string -> (Gh.release, string) result
+  ; latest_release : Provider.t -> string -> (Gh.release, string) result
   ; download : url:string -> (string, string) result
   ; run_installer : string -> (unit, string) result
   ; tools : Plugin.tool list
@@ -125,20 +125,28 @@ let install_winget (d : deps) (id : string) (update : bool) : outcome =
 
 let repo_page (repo : string) : string = "https://github.com/" ^ Strutil.canon_repo repo
 
-let install_github (d : deps) ~(value : string) (repo : string) (update : bool) : outcome =
+let install_repo
+      (d : deps)
+      ~(value : string)
+      (prov : Provider.t)
+      (repo : string)
+      (update : bool)
+  : outcome
+  =
   let done_status = if update then Updated else Installed in
-  match d.latest_release repo with
+  match d.latest_release prov repo with
   | Error _ ->
     (* API unreachable: fall back to opening the repo page, mirroring
        the no-asset fallback below, so a link-like row never dead-ends. *)
-    (match d.open_browser (repo_page repo) with
+    (match d.open_browser (Provider.page_url prov repo) with
      | Ok () -> succeed value Opened
      | Error e -> fail value e)
   | Ok rel ->
     (match Gh.match_by_arch rel.Gh.assets with
      | None ->
-       (* No Windows installer asset: open the release page instead. *)
-       let page = repo_page repo ^ "/releases/latest" in
+       (* No Windows installer asset: open the release feed instead
+          (the repo page for GitLab: no stable latest permalink). *)
+       let page = Provider.page_url prov repo ^ Provider.release_suffix prov in
        (match d.open_browser page with
         | Ok () -> succeed value Opened
         | Error e -> fail value e)
@@ -169,15 +177,19 @@ let install_plugin (d : deps) (t : Plugin.tool) (id : string) (update : bool) : 
 ;;
 
 (** Dispatch an install/update for one manifest entry. [kind] is one of
-    ["winget"], ["github"], ["url"], a plugin tool name, or anything
-    else (a skip). winget keeps its special path (already-installed
-    readings); its plugin entry only documents the equivalent command.
-    A non-empty [upstream] diverts winget, github, and plugin rows to
-    the vendor's GitHub release instead of their PM; outcomes still
-    carry the manifest value. Url rows always open the page. *)
+    ["winget"], ["github"], ["gitlab"], ["forgejo"], ["url"], a plugin
+    tool name, or anything else (a skip). winget keeps its special path
+    (already-installed readings); its plugin entry only documents the
+    equivalent command. A non-empty [upstream] diverts winget, github,
+    gitlab, forgejo, and plugin rows to the vendor's release instead of
+    their PM (the provider is parsed out of the pin); outcomes still
+    carry the manifest value. Url rows always open the page. [host]
+    carries the self-hosted forge host for gitlab/forgejo rows
+    (defaulting to gitlab.com / codeberg.org). *)
 let install
       (d : deps)
       ?(upstream : string = "")
+      ?(host : string = "")
       (kind : string)
       (value : string)
       (update : bool)
@@ -186,17 +198,32 @@ let install
   match kind with
   | "winget" ->
     if upstream <> ""
-    then install_github d ~value upstream update
+    then (
+      let prov, repo = Provider.of_upstream upstream in
+      install_repo d ~value prov repo update)
     else install_winget d value update
   | "github" ->
-    install_github d ~value (if upstream <> "" then upstream else value) update
+    let prov, repo =
+      if upstream <> "" then Provider.of_upstream upstream else Provider.GitHub, value
+    in
+    install_repo d ~value prov repo update
+  | "gitlab" ->
+    let host = if host = "" then "gitlab.com" else host in
+    let repo = if upstream <> "" then snd (Provider.of_upstream upstream) else value in
+    install_repo d ~value (Provider.GitLab host) repo update
+  | "forgejo" ->
+    let host = if host = "" then "codeberg.org" else host in
+    let repo = if upstream <> "" then snd (Provider.of_upstream upstream) else value in
+    install_repo d ~value (Provider.Forgejo host) repo update
   | "url" ->
     (match d.open_browser value with
      | Ok () -> succeed value Opened
      | Error e -> fail value e)
   | other ->
     if upstream <> ""
-    then install_github d ~value upstream update
+    then (
+      let prov, repo = Provider.of_upstream upstream in
+      install_repo d ~value prov repo update)
     else (
       match Plugin.find other d.tools with
       | None -> { value; status = Skipped ("unsupported type \"" ^ other ^ "\"") }
@@ -214,7 +241,7 @@ let real_deps (fetch : Fetch.fetch) ~winget_override () : deps =
         | Error _ -> "")
   ; spawn = Bootstrap.real_spawn
   ; open_browser = real_open_browser Bootstrap.real_spawn
-  ; latest_release = Gh.latest_release fetch
+  ; latest_release = Provider.latest fetch
   ; download = (fun ~url -> Hash.download_and_verify fetch Hash.No_expected url)
   ; run_installer = run_installer Bootstrap.real_spawn
   ; tools = Inventory.built_ins

@@ -6,7 +6,7 @@ let base_deps
       ?(winget = fun () -> "C:\\w\\winget.exe")
       ?(spawn = fun _ _ -> "", true)
       ?(browser = fun _ -> Ok ())
-      ?(latest = fun _ -> Error "no net")
+      ?(latest = fun _ _ -> Error "no net")
       ?(download = fun ~url:_ -> Error "no net")
       ?(installer = fun _ -> Ok ())
       ?(tools = [])
@@ -138,7 +138,7 @@ let test_winget_upstream_install () =
       ~spawn:(fun _ _ ->
         spawned := true;
         "", true)
-      ~latest:(fun repo ->
+      ~latest:(fun _ repo ->
         Alcotest.(check string) "repo" "owner/tool" repo;
         Ok win_release)
       ~download:(fun ~url ->
@@ -156,7 +156,7 @@ let test_winget_upstream_install () =
 let test_winget_upstream_update () =
   let d =
     base_deps
-      ~latest:(fun _ -> Ok win_release)
+      ~latest:(fun _ _ -> Ok win_release)
       ~download:(fun ~url:_ -> Ok "/tmp/tool.exe")
       ()
   in
@@ -174,7 +174,7 @@ let test_pm_upstream_update () =
       ~spawn:(fun _ _ ->
         spawned := true;
         "", true)
-      ~latest:(fun repo ->
+      ~latest:(fun _ repo ->
         Alcotest.(check string) "repo" "owner/tool" repo;
         Ok win_release)
       ~download:(fun ~url:_ -> Ok "/tmp/tool.exe")
@@ -189,7 +189,7 @@ let test_pm_upstream_update () =
 let test_github_upstream_override () =
   let d =
     base_deps
-      ~latest:(fun repo ->
+      ~latest:(fun _ repo ->
         Alcotest.(check string) "repo" "other/repo" repo;
         Ok win_release)
       ~download:(fun ~url:_ -> Ok "/tmp/tool.exe")
@@ -205,7 +205,7 @@ let test_github_happy () =
   let got_path = ref "" in
   let d =
     base_deps
-      ~latest:(fun repo ->
+      ~latest:(fun _ repo ->
         Alcotest.(check string) "repo" "owner/tool" repo;
         Ok win_release)
       ~download:(fun ~url ->
@@ -226,7 +226,7 @@ let test_github_no_asset_opens_page () =
   let opened = ref "" in
   let d =
     base_deps
-      ~latest:(fun _ -> Ok { Gh.tag_name = "v1"; assets = [] })
+      ~latest:(fun _ _ -> Ok { Gh.tag_name = "v1"; assets = [] })
       ~browser:(fun url ->
         opened := url;
         Ok ())
@@ -244,7 +244,7 @@ let test_github_api_error_opens_page () =
   let opened = ref "" in
   let d =
     base_deps
-      ~latest:(fun _ -> Error "HTTP 404")
+      ~latest:(fun _ _ -> Error "HTTP 404")
       ~browser:(fun url ->
         opened := url;
         Ok ())
@@ -406,6 +406,63 @@ let test_browser_darwin () =
   Alcotest.(check string) "open" "open" !seen
 ;;
 
+let test_gitlab_install () =
+  (* gitlab rows query the GitLab provider on the default host; the
+     outcome keeps the manifest value. *)
+  let seen = ref (Provider.GitHub, "") in
+  let d =
+    base_deps
+      ~latest:(fun prov repo ->
+        seen := prov, repo;
+        Ok win_release)
+      ~download:(fun ~url:_ -> Ok "/tmp/tool.exe")
+      ()
+  in
+  let r = Install.install d "gitlab" "group/proj" false in
+  Alcotest.(check string) "provider" "gitlab" (Provider.to_string (fst !seen));
+  Alcotest.(check string) "host" "gitlab.com" (Provider.host_of (fst !seen));
+  Alcotest.(check string) "repo" "group/proj" (snd !seen);
+  Alcotest.(check string) "value kept" "group/proj" r.Install.value;
+  Alcotest.(check bool) "installed" true (r.Install.status = Install.Installed)
+;;
+
+let test_gitlab_no_asset_opens_page () =
+  (* GitLab has no latest-release permalink: the fallback opens the
+     repo page itself. *)
+  let opened = ref "" in
+  let d =
+    base_deps
+      ~latest:(fun _ _ -> Ok { Gh.tag_name = "v1"; assets = [] })
+      ~browser:(fun url ->
+        opened := url;
+        Ok ())
+      ()
+  in
+  let r = Install.install d "gitlab" "group/proj" false in
+  Alcotest.(check string) "repo page" "https://gitlab.com/group/proj" !opened;
+  Alcotest.(check bool) "opened" true (r.Install.status = Install.Opened)
+;;
+
+let test_forgejo_selfhosted () =
+  (* forgejo rows carry their self-hosted host; the manifest value is
+     the bare path, the host rides alongside. *)
+  let seen = ref (Provider.GitHub, "") in
+  let d =
+    base_deps
+      ~latest:(fun prov repo ->
+        seen := prov, repo;
+        Ok win_release)
+      ~download:(fun ~url:_ -> Ok "/tmp/tool.exe")
+      ()
+  in
+  let r = Install.install ~host:"git.example.com" d "forgejo" "owner/repo" false in
+  Alcotest.(check string) "provider" "forgejo" (Provider.to_string (fst !seen));
+  Alcotest.(check string) "host" "git.example.com" (Provider.host_of (fst !seen));
+  Alcotest.(check string) "repo" "owner/repo" (snd !seen);
+  Alcotest.(check string) "value kept" "owner/repo" r.Install.value;
+  Alcotest.(check bool) "installed" true (r.Install.status = Install.Installed)
+;;
+
 let () =
   Alcotest.run
     "install"
@@ -432,6 +489,14 @@ let () =
             "api error opens page"
             `Quick
             test_github_api_error_opens_page
+        ] )
+    ; ( "forges"
+      , [ Alcotest.test_case "gitlab install" `Quick test_gitlab_install
+        ; Alcotest.test_case
+            "gitlab no asset opens page"
+            `Quick
+            test_gitlab_no_asset_opens_page
+        ; Alcotest.test_case "forgejo self-hosted" `Quick test_forgejo_selfhosted
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "url opens" `Quick test_url_opens

@@ -63,3 +63,7 @@
 (test
  (name test_strutil)
  (libraries devkit alcotest))
+
+(test
+ (name test_provider)
+ (libraries devkit alcotest))

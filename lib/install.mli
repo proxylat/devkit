@@ -1,4 +1,5 @@
-(** Package installation across winget, GitHub releases and plain URLs. *)
+(** Package installation across winget, forge releases (GitHub, GitLab,
+    Forgejo-family) and plain URLs. *)
 
 type status =
   | Installed
@@ -19,7 +20,7 @@ type deps =
   { winget : unit -> string
   ; spawn : Bootstrap.spawn
   ; open_browser : string -> (unit, string) result
-  ; latest_release : string -> (Gh.release, string) result
+  ; latest_release : Provider.t -> string -> (Gh.release, string) result
   ; download : url:string -> (string, string) result
   ; run_installer : string -> (unit, string) result
   ; tools : Plugin.tool list
@@ -37,7 +38,16 @@ val run_installer : Bootstrap.spawn -> string -> (unit, string) result
 val real_open_browser : ?os:string -> Bootstrap.spawn -> string -> (unit, string) result
 
 (** Dispatch an install/update for one manifest entry. A non-empty
-    [upstream] diverts winget rows to the vendor's GitHub release. *)
-val install : deps -> ?upstream:string -> string -> string -> bool -> outcome
+    [upstream] diverts winget, github, gitlab, forgejo, and plugin rows
+    to the vendor's release (the provider is parsed out of the pin).
+    [host] carries the self-hosted forge host for gitlab/forgejo rows. *)
+val install
+  :  deps
+  -> ?upstream:string
+  -> ?host:string
+  -> string
+  -> string
+  -> bool
+  -> outcome
 
 val real_deps : Fetch.fetch -> winget_override:string -> unit -> deps

@@ -96,6 +96,19 @@ let enter_opens_links () =
    | Tui.Do_open (_, u) ->
      Alcotest.(check string) "manual repo page" "https://github.com/owner/tool" u
    | _ -> Alcotest.fail "manual github opens");
+  (match open_at (Manifest.GitLab "gitlab.com") Manifest.Installed "group/proj" with
+   | Tui.Do_open (_, u) ->
+     Alcotest.(check string) "gitlab page" "https://gitlab.com/group/proj" u
+   | _ -> Alcotest.fail "installed gitlab opens");
+  (match
+     open_at
+       (Manifest.Forgejo "git.example.com")
+       Manifest.Manual
+       "https://git.example.com/owner/repo"
+   with
+   | Tui.Do_open (_, u) ->
+     Alcotest.(check string) "forgejo page" "https://git.example.com/owner/repo" u
+   | _ -> Alcotest.fail "manual forgejo opens");
   match open_at Manifest.Winget Manifest.Installed "A.B" with
   | Tui.Do_nothing -> ()
   | _ -> Alcotest.fail "installed winget is noop"

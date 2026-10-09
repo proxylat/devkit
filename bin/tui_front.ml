@@ -90,8 +90,18 @@ let classify : LTerm_event.t -> ev = function
 let kind_of : Manifest.item_type -> string = function
   | Manifest.Winget -> "winget"
   | Manifest.GitHub -> "github"
+  | Manifest.GitLab _ -> "gitlab"
+  | Manifest.Forgejo _ -> "forgejo"
   | Manifest.Url -> "url"
   | Manifest.Pm s -> s
+;;
+
+(** Self-hosted forge host for gitlab/forgejo rows; anything else
+    passes [""] and the callee defaults. *)
+let host_of : Manifest.item_type -> string = function
+  | Manifest.GitLab h -> h
+  | Manifest.Forgejo h -> h
+  | _ -> ""
 ;;
 
 let press_enter ~draw (deps : Install.deps) (st : Tui.state) : Tui.state Lwt.t =
@@ -111,6 +121,7 @@ let press_enter ~draw (deps : Install.deps) (st : Tui.state) : Tui.state Lwt.t =
          (Install.install
             deps
             ~upstream:item.Manifest.upstream
+            ~host:(host_of item.Manifest.typ)
             (kind_of item.Manifest.typ)
             item.Manifest.value
             update))

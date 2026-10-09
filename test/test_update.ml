@@ -182,6 +182,43 @@ let upstream_newer_current_fail () =
     (Update.upstream_updates fetch items)
 ;;
 
+let upstream_forge_urls () =
+  (* Forge pins route to their own APIs: the GitLab list endpoint with
+     a %2F-encoded path, the Forgejo latest endpoint. *)
+  let urls = ref [] in
+  let fetch ?timeout_s:_ url _ =
+    urls := url :: !urls;
+    if Strutil.contains_substring "gitlab.com" url
+    then Ok {|[{"tag_name": "v2.0", "assets": {"links": []}}]|}
+    else Ok {|{"tag_name": "v3.0", "assets": []}|}
+  in
+  let items =
+    [ pin "g" "https://gitlab.com/group/proj" "1.0" Installed
+    ; pin "f" "forgejo:https://git.example.com/owner/repo" "1.0" Installed
+    ]
+  in
+  Alcotest.(check (list (pair string string)))
+    "both behind"
+    [ "g", "v2.0"; "f", "v3.0" ]
+    (Update.upstream_updates fetch items);
+  Alcotest.(check bool)
+    "gitlab api hit"
+    true
+    (List.exists
+       (fun u ->
+          Strutil.contains_substring "gitlab.com/api/v4/projects/group%2Fproj/releases" u)
+       !urls);
+  Alcotest.(check bool)
+    "forgejo api hit"
+    true
+    (List.exists
+       (fun u ->
+          Strutil.contains_substring
+            "git.example.com/api/v1/repos/owner/repo/releases/latest"
+            u)
+       !urls)
+;;
+
 let check_all_pins_skip_registry () =
   (* A pinned npm row hits the GitHub API, never npm outdated. *)
   let run _ _ = Alcotest.fail "registry must not run for pinned rows" in
@@ -219,6 +256,7 @@ let () =
         ] )
     ; ( "upstream"
       , [ Alcotest.test_case "newer/current/fail" `Quick upstream_newer_current_fail
+        ; Alcotest.test_case "forge urls" `Quick upstream_forge_urls
         ; Alcotest.test_case
             "check_all skips registry"
             `Quick

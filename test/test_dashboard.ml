@@ -302,7 +302,7 @@ let upstream_truth () =
       ; "Plain.App", "Plain", "2.0", "3.0"
       ]
   in
-  let upstream_ver = function
+  let upstream_ver _ = function
     | "git/git" -> Some "v9.9"
     | "brave/brave" -> Some "v1.80"
     | _ -> None
@@ -338,7 +338,7 @@ let upstream_offline_keeps_winget () =
   in
   let info = winget_info [ "Git.Git", "Git", "2.47.1", "2.48.0" ] in
   let sections =
-    Dashboard.build_sections ~upstream_ver:(fun _ -> None) [] manifest (Some info)
+    Dashboard.build_sections ~upstream_ver:(fun _ _ -> None) [] manifest (Some info)
   in
   let pending = List.nth sections 0 in
   Alcotest.(check string) "pending first" "Pending updates" pending.name;
@@ -363,7 +363,7 @@ let upstream_all_pms () =
     ; Dashboard.{ name = "prettier"; version = "3.1.0"; pm = "npm" }
     ]
   in
-  let upstream_ver = function
+  let upstream_ver _ = function
     | "microsoft/TypeScript" -> Some "v5.9.2"
     | "prettier/prettier" -> Some "v3.1.0"
     | _ -> None

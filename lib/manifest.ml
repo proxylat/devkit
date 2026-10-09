@@ -4,11 +4,14 @@
     [[section]] array, each section holding a [name] and a [package]
     array of [{ id }] tables with optional version fields. The id carries
     its own source, first match wins: a github.com URL canonicalizes to
-    its [owner/repo]; any other URL is a plain link; [prefix:name] is
-    explicit ([winget:]/[github:]/[url:] or a package-manager name);
-    [@scope/pkg] is npm; [owner/repo] is GitHub; dotted [Publisher.App]
-    is winget; a bare word is ambiguous and rejected. A leftover [pm]
-    key is also rejected. A package may also carry [upstream]: version
+    its [owner/repo]; a gitlab.com or codeberg.org URL infers its forge
+    the same way; any other URL is a plain link; [prefix:name] is
+    explicit ([winget:]/[github:]/[gitlab:]/[codeberg:]/[forgejo:]/[url:]
+    or a package-manager name); [@scope/pkg] is npm; [owner/repo] is
+    GitHub; dotted [Publisher.App] is winget; a bare word is ambiguous
+    and rejected. Self-hosted forges need the prefix with the full URL
+    ([gitlab:https://host/group/project]) since no static rule can tell
+    them apart. A leftover [pm] key is also rejected. A package may also carry [upstream]: version
     truth and downloads then come from the vendor's releases instead of
     the community manifest. Parsing is total: malformed TOML yields an
     empty result, rejected rows are skipped with a [warnings] entry
@@ -20,6 +23,8 @@ let filename = "devkit.toml"
 type item_type =
   | Winget
   | GitHub
+  | GitLab of string (** forge host, always explicit, e.g. ["gitlab.com"] *)
+  | Forgejo of string (** forge host, always explicit, e.g. ["codeberg.org"] *)
   | Url
   | Pm of string
 
@@ -65,6 +70,8 @@ let make_item typ value =
 let type_string = function
   | Winget -> "winget"
   | GitHub -> "github"
+  | GitLab _ -> "gitlab"
+  | Forgejo _ -> "forgejo"
   | Url -> "url"
   | Pm s -> s
 ;;
@@ -73,6 +80,9 @@ let item_type_of_string s =
   match String.lowercase_ascii s with
   | "winget" -> Winget
   | "github" -> GitHub
+  | "gitlab" -> GitLab "gitlab.com"
+  | "forgejo" | "gitea" -> Forgejo "codeberg.org"
+  | "codeberg" -> Forgejo "codeberg.org"
   | "url" -> Url
   | _ -> Pm s
 ;;
@@ -114,11 +124,15 @@ let check_dotted id =
   else Ok (Winget, id)
 ;;
 
-(** Explicit [url:...] must reach the prefix rung, not the URL rung. *)
-let url_prefixed s =
+(** An explicit [kind:...] prefix must reach the prefix rung, not the
+    URL rung. Unknown prefixes with a scheme stay plain links. *)
+let known_prefix s =
   match String.index_opt s ':' with
   | None -> false
-  | Some i -> String.sub s 0 i |> String.trim |> String.lowercase_ascii = "url"
+  | Some i ->
+    (match String.sub s 0 i |> String.trim |> String.lowercase_ascii with
+     | "winget" | "github" | "gitlab" | "codeberg" | "gitea" | "forgejo" | "url" -> true
+     | _ -> false)
 ;;
 
 (** [classify id] derives the package source from the id string (see the
@@ -132,30 +146,42 @@ let classify (id : string) : (item_type * string, string) result =
     let canon = Strutil.canon_repo id in
     if canon <> id && is_repo_shape canon
     then Ok (GitHub, canon)
-    else if Strutil.contains_substring "://" id && not (url_prefixed id)
-    then Ok (Url, id)
     else (
-      match String.index_opt id ':' with
-      | Some i ->
-        let pre = String.sub id 0 i |> String.trim |> String.lowercase_ascii in
-        let rest = String.trim (String.sub id (i + 1) (String.length id - i - 1)) in
-        (match pre, rest with
-         | "", _ -> Error "empty prefix before ':'"
-         | _, "" -> Error ("nothing after '" ^ pre ^ ":'")
-         | "winget", r -> check_plain r (fun () -> Ok (Winget, r))
-         | "github", r ->
-           let c = Strutil.canon_repo r in
-           if is_repo_shape c then Ok (GitHub, c) else Error "want owner/repo"
-         | "url", r -> Ok (Url, r)
-         | p, r -> check_plain r (fun () -> Ok (Pm p, r)))
+      match Provider.infer_url id with
+      | Some (Provider.GitLab h, path) -> Ok (GitLab h, path)
+      | Some (Provider.Forgejo h, path) -> Ok (Forgejo h, path)
+      | Some (Provider.GitHub, path) -> Ok (GitHub, path)
       | None ->
-        if id.[0] = '@' && String.contains id '/'
-        then check_plain id (fun () -> Ok (Pm "npm", id))
-        else if String.contains id '/'
-        then if is_repo_shape id then Ok (GitHub, id) else Error "want owner/repo"
-        else if String.contains id '.'
-        then check_dotted id
-        else Error ("ambiguous, try npm:" ^ id)))
+        if Strutil.contains_substring "://" id && not (known_prefix id)
+        then Ok (Url, id)
+        else (
+          match String.index_opt id ':' with
+          | Some i ->
+            let pre = String.sub id 0 i |> String.trim |> String.lowercase_ascii in
+            let rest = String.trim (String.sub id (i + 1) (String.length id - i - 1)) in
+            (match pre, rest with
+             | "", _ -> Error "empty prefix before ':'"
+             | _, "" -> Error ("nothing after '" ^ pre ^ ":'")
+             | "winget", r -> check_plain r (fun () -> Ok (Winget, r))
+             | "github", r ->
+               let c = Strutil.canon_repo r in
+               if is_repo_shape c then Ok (GitHub, c) else Error "want owner/repo"
+             | ("gitlab" | "codeberg" | "gitea" | "forgejo"), r ->
+               (match Provider.of_prefix pre r with
+                | Ok (Provider.GitLab h, path) -> Ok (GitLab h, path)
+                | Ok (Provider.Forgejo h, path) -> Ok (Forgejo h, path)
+                | Ok (Provider.GitHub, path) -> Ok (GitHub, path)
+                | Error reason -> Error reason)
+             | "url", r -> Ok (Url, r)
+             | p, r -> check_plain r (fun () -> Ok (Pm p, r)))
+          | None ->
+            if id.[0] = '@' && String.contains id '/'
+            then check_plain id (fun () -> Ok (Pm "npm", id))
+            else if String.contains id '/'
+            then if is_repo_shape id then Ok (GitHub, id) else Error "want owner/repo"
+            else if String.contains id '.'
+            then check_dotted id
+            else Error ("ambiguous, try npm:" ^ id))))
 ;;
 
 (** [parse text] parses a devkit.toml manifest. *)
@@ -223,6 +249,14 @@ let to_string (r : parse_result) : string =
   let id_of_item it =
     match it.typ with
     | Winget | GitHub | Url -> it.value
+    | GitLab h ->
+      if h = "gitlab.com"
+      then "gitlab:" ^ it.value
+      else "gitlab:https://" ^ h ^ "/" ^ it.value
+    | Forgejo h ->
+      if h = "codeberg.org"
+      then "codeberg:" ^ it.value
+      else "forgejo:https://" ^ h ^ "/" ^ it.value
     | Pm p -> p ^ ":" ^ it.value
   in
   let pkg it =

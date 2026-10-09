@@ -77,7 +77,7 @@ let candidates (it : item) : string list =
     | Url ->
       let file = cut_at [ '?'; '#' ] (after_last [ '/'; '\\' ] v) in
       [ file; strip_ext file ]
-    | Winget | GitHub | Pm _ -> [ after_last [ '.'; '/'; '\\' ] v ]
+    | Winget | GitHub | GitLab _ | Forgejo _ | Pm _ -> [ after_last [ '.'; '/'; '\\' ] v ]
   in
   List.sort_uniq String.compare (List.filter (fun s -> s <> "") (v :: shorts))
 ;;
@@ -97,7 +97,7 @@ let candidates (it : item) : string list =
     reading; a failed lookup keeps the PM reading. *)
 let build_sections
       ?(show : string -> string option = fun _ -> None)
-      ?(upstream_ver : string -> string option = fun _ -> None)
+      ?(upstream_ver : Provider.t -> string -> string option = fun _ _ -> None)
       ?(run : Proc.runner option = None)
       ?(os : string = Sys.os_type)
       (apps : app list)
@@ -156,7 +156,8 @@ let build_sections
                            }
                          else { it with status = Installed }
                        | None -> { it with status = NotFound })
-                    | GitHub | Url | Pm _ -> { it with status = Manual }
+                    | GitHub | GitLab _ | Forgejo _ | Url | Pm _ ->
+                      { it with status = Manual }
                   in
                   let it =
                     if it.status <> Installed && it.status <> NeedsUpdate
@@ -235,19 +236,19 @@ let build_sections
          List.filter_map
            (fun it ->
               if it.upstream <> "" && (it.status = Installed || it.status = NeedsUpdate)
-              then Some it.upstream
+              then Some (Provider.of_upstream it.upstream)
               else None)
            sec.items)
       pkgs_sections
-    |> List.sort_uniq String.compare
+    |> List.sort_uniq compare
   in
-  let upstream_table : (string, string option) Hashtbl.t =
+  let upstream_table : (Provider.t * string, string option) Hashtbl.t =
     Hashtbl.create (max 1 (List.length upstream_ids))
   in
   List.iter2
-    (fun repo tag -> Hashtbl.replace upstream_table repo tag)
+    (fun (prov, repo) tag -> Hashtbl.replace upstream_table (prov, repo) tag)
     upstream_ids
-    (Proc.par_map8 upstream_ver upstream_ids);
+    (Proc.par_map8 (fun (prov, repo) -> upstream_ver prov repo) upstream_ids);
   let pkgs_sections =
     List.map
       (fun sec ->
@@ -258,7 +259,9 @@ let build_sections
                   if it.upstream = "" || it.installed_version = ""
                   then it
                   else (
-                    match Hashtbl.find_opt upstream_table it.upstream with
+                    match
+                      Hashtbl.find_opt upstream_table (Provider.of_upstream it.upstream)
+                    with
                     | None | Some None -> it
                     | Some (Some tag) ->
                       if Strutil.is_newer_version it.installed_version tag

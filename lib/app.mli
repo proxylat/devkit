@@ -27,9 +27,9 @@ val load_manifest : fs -> string -> Manifest.section list * string
 
 val winget_show : Bootstrap.io -> string -> string -> string
 
-(** Vendor truth for [upstream] rows: [repo] → latest release tag
-    ([None] on any failure). *)
-val upstream_ver_of_fetch : Fetch.fetch -> string -> string option
+(** Vendor truth for [upstream] rows: [(provider, repo)] → latest
+    release tag ([None] on any failure). *)
+val upstream_ver_of_fetch : Fetch.fetch -> Provider.t -> string -> string option
 
 val scan : env -> override_path:string -> extra:Plugin.tool list -> scan
 val default_view : env -> tools:Plugin.tool list -> string

@@ -289,6 +289,32 @@ let default_upstream () =
   Alcotest.(check bool) "no pending" false (contains "PENDING" s)
 ;;
 
+let default_gitlab () =
+  (* End to end for a forge row: the npm scan names the repo short
+     name, the GitLab tag (equal to installed) confirms it, and the
+     row lands green. *)
+  let files = Hashtbl.create 1 in
+  Hashtbl.add
+    files
+    Manifest.filename
+    "[[section]]\n\
+     name = \"tools\"\n\n\
+     [[section.package]]\n\
+     id = \"gitlab:group/proj\"\n\
+     upstream = \"gitlab:group/proj\"\n";
+  let run prog _ = if prog = "npm" then Some "proj@1.0.0\n" else None in
+  let fetch ?timeout_s:_ url _ =
+    if Strutil.contains_substring "gitlab.com/api/v4/projects/group%2Fproj/releases" url
+    then Ok {|[{"tag_name": "v1.0.0", "assets": {"links": []}}]|}
+    else Error "unexpected url"
+  in
+  let e = { (env files) with run; fetch } in
+  let s = App.default_view ~tools:[] e in
+  Alcotest.(check bool) "green row" true (contains "[✓] group/proj 1.0.0" s);
+  Alcotest.(check bool) "installed section" true (contains "INSTALLED" s);
+  Alcotest.(check bool) "no pending" false (contains "PENDING" s)
+;;
+
 let scan_error () =
   let s = App.scan (env (Hashtbl.create 1)) ~override_path:"" ~extra:[] in
   Alcotest.(check string) "no winget" "" s.App.winget;
@@ -330,6 +356,7 @@ let () =
         ; Alcotest.test_case "show" `Quick show
         ; Alcotest.test_case "default" `Quick default
         ; Alcotest.test_case "default upstream" `Quick default_upstream
+        ; Alcotest.test_case "default gitlab" `Quick default_gitlab
         ; Alcotest.test_case "scan error" `Quick scan_error
         ; Alcotest.test_case "default empty" `Quick default_empty
         ] )
